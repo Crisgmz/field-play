@@ -38,3 +38,24 @@ Este MVP funciona en modo local con almacenamiento en `localStorage`.
    - `src/lib/env.ts`
    - `src/lib/data-mode.ts`
 4. El siguiente paso es migrar `AuthContext` y `AppDataContext` de mock/local a Supabase real.
+
+## Correo automático al crear reserva
+Ahora el frontend intenta disparar un correo de "reserva recibida" cuando una reserva se crea correctamente.
+
+### Archivos involucrados
+- `src/contexts/AppDataContext.tsx`
+- `src/lib/bookingEmail.ts`
+- `supabase/functions/send-booking-received-email/index.ts`
+
+### Configuración necesaria
+1. Tener Supabase CLI configurado para este proyecto.
+2. Desplegar la Edge Function:
+   ```bash
+   supabase functions deploy send-booking-received-email
+   ```
+3. Configurar secrets en Supabase:
+   ```bash
+   supabase secrets set RESEND_API_KEY=tu_api_key
+   supabase secrets set BOOKING_EMAIL_FROM="Field Play <reservas@tudominio.com>"
+   ```
+4. Si no configuras esos secrets, la reserva se crea, pero el correo no se enviará.

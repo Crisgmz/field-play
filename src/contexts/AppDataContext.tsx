@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { PHYSICAL_SLOTS } from '@/data/mockData';
 import { supabase } from '@/lib/supabase';
+import { sendBookingReceivedEmail } from '@/lib/bookingEmail';
 import { useAuth } from '@/contexts/AuthContext';
 import { Block, BlockType, Booking, BookingStatus, Club, Field, FieldType, FieldUnit, PhysicalSlotId, PricingRule, User } from '@/types';
 
@@ -251,6 +252,29 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       .single();
 
     if (error || !data) return null;
+
+    const field = fields.find((item) => item.units.some((unit) => unit.id === data.field_unit_id));
+    const unit = field?.units.find((item) => item.id === data.field_unit_id);
+    const club = clubs.find((item) => item.id === field?.club_id);
+
+    if (user?.email) {
+      try {
+        await sendBookingReceivedEmail({
+          email: user.email,
+          firstName: user.first_name,
+          clubName: club?.name,
+          fieldName: field?.name,
+          unitName: unit?.name,
+          fieldType: data.field_type,
+          date: data.date,
+          startTime: data.start_time,
+          endTime: data.end_time,
+        });
+      } catch (emailError) {
+        console.error('Could not send booking received email', emailError);
+      }
+    }
+
     await reload();
     return {
       id: data.id,
