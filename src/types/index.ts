@@ -3,8 +3,26 @@ export type UserRole = 'client' | 'club_admin';
 export interface User {
   id: string;
   email: string;
-  name: string;
+  first_name: string;
+  last_name: string;
+  phone: string;
+  national_id?: string | null;
   role: UserRole;
+}
+
+export interface LoginInput {
+  email: string;
+  password: string;
+}
+
+export interface RegisterInput {
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone: string;
+  national_id?: string;
+  password: string;
+  role?: UserRole;
 }
 
 export interface Club {
@@ -16,16 +34,33 @@ export interface Club {
   owner_id: string;
   rating: number;
   price_per_hour: number;
+  open_time: string;
+  close_time: string;
+  is_active: boolean;
 }
 
 export type FieldType = 'F11' | 'F7' | 'F5';
+export type PhysicalSlotId = 'S1' | 'S2' | 'S3' | 'S4' | 'S5' | 'S6';
+
+export interface PricingRule {
+  id: string;
+  club_id: string;
+  field_type: FieldType;
+  price_per_hour: number;
+  minimum_minutes: number;
+  increment_minutes: number;
+  is_active: boolean;
+}
 
 export interface FieldUnit {
   id: string;
   field_id: string;
   type: FieldType;
   name: string;
-  parent_id: string | null; // F5 → parent F7, F7 → parent F11
+  parent_id: string | null;
+  slot_ids: PhysicalSlotId[];
+  price_modifier?: number;
+  is_active?: boolean;
 }
 
 export interface Field {
@@ -33,7 +68,12 @@ export interface Field {
   club_id: string;
   name: string;
   units: FieldUnit[];
+  surface?: string;
+  is_active?: boolean;
+  physical_slots?: PhysicalSlotId[];
 }
+
+export type BookingStatus = 'pending' | 'confirmed' | 'cancelled';
 
 export interface Booking {
   id: string;
@@ -42,8 +82,11 @@ export interface Booking {
   date: string;
   start_time: string;
   end_time: string;
-  status: 'confirmed' | 'cancelled';
+  status: BookingStatus;
   field_type: FieldType;
+  total_price: number;
+  notes?: string;
+  created_at?: string;
 }
 
 export type BlockType = 'practice' | 'maintenance' | 'event';
@@ -65,4 +108,18 @@ export interface TimeSlot {
   available: boolean;
   availableUnits: number;
   totalUnits: number;
+}
+
+export interface SlotStatus {
+  id: PhysicalSlotId;
+  occupied: boolean;
+  selected: boolean;
+}
+
+export interface UnitOption {
+  id: string;
+  type: FieldType;
+  name: string;
+  slot_ids: PhysicalSlotId[];
+  available: boolean;
 }

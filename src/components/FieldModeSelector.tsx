@@ -6,10 +6,10 @@ interface Props {
   onSelect: (type: FieldType) => void;
 }
 
-const modes: { type: FieldType; label: string; players: string; units: number; colorClass: string }[] = [
-  { type: 'F11', label: 'Football 11', players: '11 vs 11', units: 1, colorClass: 'field-badge-11' },
-  { type: 'F7', label: 'Football 7', players: '7 vs 7', units: 3, colorClass: 'field-badge-7' },
-  { type: 'F5', label: 'Football 5', players: '5 vs 5', units: 6, colorClass: 'field-badge-5' },
+const modes = [
+  { type: 'F5' as FieldType, label: 'Fútbol 5', players: '1 slot', desc: 'Elige 1 espacio físico', colorClass: 'field-badge-5' },
+  { type: 'F7' as FieldType, label: 'Fútbol 7', players: '2 slots', desc: 'Solo pares válidos', colorClass: 'field-badge-7' },
+  { type: 'F11' as FieldType, label: 'Fútbol 11', players: '6 slots', desc: 'Usa toda la cancha', colorClass: 'field-badge-11' },
 ];
 
 export default function FieldModeSelector({ selected, onSelect }: Props) {
@@ -21,10 +21,10 @@ export default function FieldModeSelector({ selected, onSelect }: Props) {
           <button
             key={mode.type}
             onClick={() => onSelect(mode.type)}
-            className={`group relative flex flex-col items-center gap-2 rounded-xl border-2 p-5 transition-all ${
+            className={`group relative flex min-h-[138px] flex-col items-center justify-center gap-2 rounded-2xl border-2 p-5 text-center transition-all ${
               isSelected
                 ? 'border-primary bg-accent shadow-sm'
-                : 'border-border bg-card hover:border-primary/30 hover:bg-accent/50'
+                : 'border-border bg-card hover:border-primary/30 hover:bg-accent/10'
             }`}
           >
             <span className={`rounded-full px-3 py-1 text-xs font-bold ${mode.colorClass}`}>
@@ -35,7 +35,7 @@ export default function FieldModeSelector({ selected, onSelect }: Props) {
               <Users className="h-3 w-3" />
               {mode.players}
             </div>
-            <span className="text-[10px] text-muted-foreground">{mode.units} {mode.units === 1 ? 'field' : 'fields'} available</span>
+            <span className="text-[11px] text-muted-foreground">{mode.desc}</span>
           </button>
         );
       })}

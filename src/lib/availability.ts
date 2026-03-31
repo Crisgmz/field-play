@@ -1,92 +1,86 @@
-import { Booking, Block, FieldUnit, FieldType, TimeSlot } from '@/types';
+import { Block, Booking, Field, FieldType, PhysicalSlotId, SlotStatus, TimeSlot, UnitOption } from '@/types';
 import { TIME_SLOTS } from '@/data/mockData';
 
-function timeOverlaps(
-  start1: string, end1: string,
-  start2: string, end2: string
-): boolean {
+function timeOverlaps(start1: string, end1: string, start2: string, end2: string): boolean {
   return start1 < end2 && end1 > start2;
 }
 
-/**
- * Get all unit IDs that are blocked when a given unit is booked.
- * F11 → blocks all F7 and F5
- * F7 → blocks itself, its 2 F5 children, and makes F11 unavailable
- * F5 → blocks itself, its parent F7, and makes F11 unavailable
- */
-export function getAffectedUnitIds(unitId: string, units: FieldUnit[]): string[] {
-  const unit = units.find(u => u.id === unitId);
-  if (!unit) return [unitId];
-
-  const affected = new Set<string>();
-  affected.add(unitId);
-
-  if (unit.type === 'F11') {
-    // Block all children
-    units.forEach(u => {
-      if (u.type === 'F7' || u.type === 'F5') affected.add(u.id);
-    });
-  } else if (unit.type === 'F7') {
-    // Block children F5s
-    units.filter(u => u.parent_id === unitId).forEach(u => affected.add(u.id));
-    // Block parent F11
-    if (unit.parent_id) affected.add(unit.parent_id);
-  } else if (unit.type === 'F5') {
-    // Block parent F7
-    if (unit.parent_id) {
-      affected.add(unit.parent_id);
-      // Block grandparent F11
-      const parent = units.find(u => u.id === unit.parent_id);
-      if (parent?.parent_id) affected.add(parent.parent_id);
-    }
-  }
-
-  return Array.from(affected);
+export function getUnitsByType(field: Field, fieldType: FieldType) {
+  return field.units.filter((unit) => unit.type === fieldType && unit.is_active !== false);
 }
 
-export function getBlockedUnitIds(
+export function getOccupiedSlotIds(
   date: string,
   startTime: string,
   endTime: string,
-  units: FieldUnit[],
+  field: Field,
   bookings: Booking[],
-  blocks: Block[]
-): Set<string> {
-  const blocked = new Set<string>();
+  blocks: Block[],
+): Set<PhysicalSlotId> {
+  const occupied = new Set<PhysicalSlotId>();
 
-  // Check bookings
   bookings
-    .filter(b => b.date === date && b.status === 'confirmed' && timeOverlaps(startTime, endTime, b.start_time, b.end_time))
-    .forEach(b => {
-      getAffectedUnitIds(b.field_unit_id, units).forEach(id => blocked.add(id));
+    .filter((booking) => booking.date === date && booking.status === 'confirmed' && timeOverlaps(startTime, endTime, booking.start_time, booking.end_time))
+    .forEach((booking) => {
+      const unit = field.units.find((item) => item.id === booking.field_unit_id);
+      unit?.slot_ids.forEach((slotId) => occupied.add(slotId));
     });
 
-  // Check blocks
   blocks
-    .filter(bl => bl.date === date && timeOverlaps(startTime, endTime, bl.start_time, bl.end_time))
-    .forEach(bl => {
-      bl.field_unit_ids.forEach(uid => {
-        getAffectedUnitIds(uid, units).forEach(id => blocked.add(id));
+    .filter((block) => block.field_id === field.id && block.date === date && timeOverlaps(startTime, endTime, block.start_time, block.end_time))
+    .forEach((block) => {
+      block.field_unit_ids.forEach((unitId) => {
+        const unit = field.units.find((item) => item.id === unitId);
+        unit?.slot_ids.forEach((slotId) => occupied.add(slotId));
       });
     });
 
-  return blocked;
+  return occupied;
+}
+
+export function getUnitOptions(
+  date: string,
+  startTime: string,
+  endTime: string,
+  fieldType: FieldType,
+  field: Field,
+  bookings: Booking[],
+  blocks: Block[],
+): UnitOption[] {
+  const occupied = getOccupiedSlotIds(date, startTime, endTime, field, bookings, blocks);
+  return getUnitsByType(field, fieldType).map((unit) => ({
+    id: unit.id,
+    type: unit.type,
+    name: unit.name,
+    slot_ids: unit.slot_ids,
+    available: unit.slot_ids.every((slotId) => !occupied.has(slotId)),
+  }));
+}
+
+export function getSlotStatuses(
+  occupied: Set<PhysicalSlotId>,
+  selectedSlots: PhysicalSlotId[] = [],
+): SlotStatus[] {
+  return ['S1', 'S2', 'S3', 'S4', 'S5', 'S6'].map((slotId) => ({
+    id: slotId,
+    occupied: occupied.has(slotId),
+    selected: selectedSlots.includes(slotId),
+  }));
 }
 
 export function getAvailableTimeSlots(
   date: string,
   fieldType: FieldType,
-  units: FieldUnit[],
+  field: Field,
   bookings: Booking[],
-  blocks: Block[]
+  blocks: Block[],
 ): TimeSlot[] {
-  const targetUnits = units.filter(u => u.type === fieldType);
-  const totalUnits = targetUnits.length;
+  const totalUnits = getUnitsByType(field, fieldType).length;
 
-  return TIME_SLOTS.slice(0, -1).map((start, i) => {
-    const end = TIME_SLOTS[i + 1];
-    const blockedIds = getBlockedUnitIds(date, start, end, units, bookings, blocks);
-    const availableUnits = targetUnits.filter(u => !blockedIds.has(u.id)).length;
+  return TIME_SLOTS.slice(0, -1).map((start, index) => {
+    const end = TIME_SLOTS[index + 1];
+    const availableUnits = getUnitOptions(date, start, end, fieldType, field, bookings, blocks)
+      .filter((option) => option.available).length;
 
     return {
       start,
@@ -103,11 +97,10 @@ export function findAvailableUnit(
   startTime: string,
   endTime: string,
   fieldType: FieldType,
-  units: FieldUnit[],
+  field: Field,
   bookings: Booking[],
-  blocks: Block[]
-): FieldUnit | null {
-  const blockedIds = getBlockedUnitIds(date, startTime, endTime, units, bookings, blocks);
-  const targetUnits = units.filter(u => u.type === fieldType);
-  return targetUnits.find(u => !blockedIds.has(u.id)) || null;
+  blocks: Block[],
+) {
+  return getUnitOptions(date, startTime, endTime, fieldType, field, bookings, blocks)
+    .find((option) => option.available) ?? null;
 }

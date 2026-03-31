@@ -1,3 +1,40 @@
-# Welcome to your Lovable project
+# RealPlay MVP
 
-TODO: Document your project here
+MVP de reservas deportivas con:
+- autenticación local mock para demo
+- registro con nombre, apellido, teléfono y cédula opcional
+- flujo de reservas
+- panel administrativo lateral
+- archivo `base de datos.sql` para montar la estructura en Supabase
+
+## Colores base
+- Principal: `#0d1333`
+- Secundario oscuro: `#0e0d0d`
+- Acento: `#f89217`
+- Destructivo/alerta: `#e31c3b`
+
+## Demo local
+```bash
+npm install
+npm run dev
+```
+
+## Credenciales demo
+- Cliente: `player@fieldplay.com`
+- Admin: `admin@fieldplay.com`
+- Contraseña: `123456`
+
+## Estado actual
+Este MVP funciona en modo local con almacenamiento en `localStorage`.
+
+## Para conectar Supabase real
+1. Ejecuta `base de datos.sql` en tu proyecto Supabase.
+2. Crea variables:
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_ANON_KEY`
+3. Ya existe base mínima de conexión en:
+   - `src/lib/supabase.ts`
+   - `src/lib/supabase-types.ts`
+   - `src/lib/env.ts`
+   - `src/lib/data-mode.ts`
+4. El siguiente paso es migrar `AuthContext` y `AppDataContext` de mock/local a Supabase real.
