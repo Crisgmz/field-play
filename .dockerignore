@@ -1,0 +1,10 @@
+node_modules
+dist
+.git
+.gitignore
+.vscode
+coverage
+.env
+.env.*
+Dockerfile
+README.md
