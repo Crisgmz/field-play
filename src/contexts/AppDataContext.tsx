@@ -63,9 +63,17 @@ interface AppDataContextType {
 
 const AppDataContext = createContext<AppDataContextType | undefined>(undefined);
 
-function createUnit(id: string, fieldId: string, type: FieldType, name: string, slotIds: PhysicalSlotId[]): Omit<FieldUnit, 'created_at'> {
+interface FieldUnitInput {
+  field_id: string;
+  type: FieldType;
+  name: string;
+  parent_id: string | null;
+  slot_ids: PhysicalSlotId[];
+  is_active: boolean;
+}
+
+function createUnit(fieldId: string, type: FieldType, name: string, slotIds: PhysicalSlotId[]): FieldUnitInput {
   return {
-    id,
     field_id: fieldId,
     type,
     name,
@@ -75,34 +83,34 @@ function createUnit(id: string, fieldId: string, type: FieldType, name: string, 
   };
 }
 
-function buildFieldUnits(fieldId: string, layout: CreateFieldInput['layout']): Omit<FieldUnit, 'created_at'>[] {
+function buildFieldUnits(fieldId: string, layout: CreateFieldInput['layout']): FieldUnitInput[] {
   if (layout === 'full_11') {
-    return [createUnit(`${fieldId}-f11`, fieldId, 'F11', 'F11', ['S1', 'S2', 'S3', 'S4', 'S5', 'S6'])];
+    return [createUnit(fieldId, 'F11', 'F11', ['S1', 'S2', 'S3', 'S4', 'S5', 'S6'])];
   }
 
   if (layout === 'three_7') {
     return [
-      createUnit(`${fieldId}-f7-1`, fieldId, 'F7', 'F7_1', ['S1', 'S2']),
-      createUnit(`${fieldId}-f7-2`, fieldId, 'F7', 'F7_2', ['S3', 'S4']),
-      createUnit(`${fieldId}-f7-3`, fieldId, 'F7', 'F7_3', ['S5', 'S6']),
+      createUnit(fieldId, 'F7', 'F7_1', ['S1', 'S2']),
+      createUnit(fieldId, 'F7', 'F7_2', ['S3', 'S4']),
+      createUnit(fieldId, 'F7', 'F7_3', ['S5', 'S6']),
     ];
   }
 
   if (layout === 'six_5') {
-    return PHYSICAL_SLOTS.map((slotId, index) => createUnit(`${fieldId}-f5-${index + 1}`, fieldId, 'F5', `C${index + 1}`, [slotId]));
+    return PHYSICAL_SLOTS.map((slotId, index) => createUnit(fieldId, 'F5', `C${index + 1}`, [slotId]));
   }
 
   return [
-    createUnit(`${fieldId}-f11`, fieldId, 'F11', 'F11', ['S1', 'S2', 'S3', 'S4', 'S5', 'S6']),
-    createUnit(`${fieldId}-f7-1`, fieldId, 'F7', 'F7_1', ['S1', 'S2']),
-    createUnit(`${fieldId}-f7-2`, fieldId, 'F7', 'F7_2', ['S3', 'S4']),
-    createUnit(`${fieldId}-f7-3`, fieldId, 'F7', 'F7_3', ['S5', 'S6']),
-    createUnit(`${fieldId}-f5-1`, fieldId, 'F5', 'C1', ['S1']),
-    createUnit(`${fieldId}-f5-2`, fieldId, 'F5', 'C2', ['S2']),
-    createUnit(`${fieldId}-f5-3`, fieldId, 'F5', 'C3', ['S3']),
-    createUnit(`${fieldId}-f5-4`, fieldId, 'F5', 'C4', ['S4']),
-    createUnit(`${fieldId}-f5-5`, fieldId, 'F5', 'C5', ['S5']),
-    createUnit(`${fieldId}-f5-6`, fieldId, 'F5', 'C6', ['S6']),
+    createUnit(fieldId, 'F11', 'F11', ['S1', 'S2', 'S3', 'S4', 'S5', 'S6']),
+    createUnit(fieldId, 'F7', 'F7_1', ['S1', 'S2']),
+    createUnit(fieldId, 'F7', 'F7_2', ['S3', 'S4']),
+    createUnit(fieldId, 'F7', 'F7_3', ['S5', 'S6']),
+    createUnit(fieldId, 'F5', 'C1', ['S1']),
+    createUnit(fieldId, 'F5', 'C2', ['S2']),
+    createUnit(fieldId, 'F5', 'C3', ['S3']),
+    createUnit(fieldId, 'F5', 'C4', ['S4']),
+    createUnit(fieldId, 'F5', 'C5', ['S5']),
+    createUnit(fieldId, 'F5', 'C6', ['S6']),
   ];
 }
 
@@ -427,9 +435,12 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     if (error || !data) return null;
 
-    const units = buildFieldUnits(data.id, payload.layout);
-    const { error: unitsError } = await supabase.from('field_units').insert(units);
-    if (unitsError) {
+    const unitPayloads = buildFieldUnits(data.id, payload.layout);
+    const { data: insertedUnits, error: unitsError } = await supabase
+      .from('field_units')
+      .insert(unitPayloads)
+      .select('*');
+    if (unitsError || !insertedUnits) {
       console.error('Error inserting field units:', unitsError);
       await supabase.from('fields').delete().eq('id', data.id);
       return null;
@@ -443,7 +454,15 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       surface: data.surface ?? undefined,
       is_active: data.is_active,
       physical_slots: PHYSICAL_SLOTS,
-      units: units as FieldUnit[],
+      units: insertedUnits.map((u) => ({
+        id: u.id,
+        field_id: u.field_id,
+        type: u.type,
+        name: u.name,
+        parent_id: u.parent_id,
+        slot_ids: (u.slot_ids as PhysicalSlotId[]) ?? [],
+        is_active: u.is_active,
+      })),
     };
   };
 
