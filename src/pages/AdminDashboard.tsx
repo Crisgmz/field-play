@@ -33,7 +33,7 @@ const layoutLabels = {
   full_11: 'Solo F11 (usa S1-S6)',
   three_7: '3 canchas F7 (S1+S2, S3+S4, S5+S6)',
   six_5: '6 canchas F5 (una por slot)',
-  playtomic_full: 'Completo estilo Playtomic: F11 + F7 + F5',
+  versatile_full: 'Versátil (F11 + F7 + F5)',
 } as const;
 
 export default function AdminDashboard() {
@@ -94,7 +94,10 @@ export default function AdminDashboard() {
     club_id: clubs[0]?.id ?? '',
     name: '',
     surface: 'Gramilla sintética',
-    layout: 'playtomic_full' as keyof typeof layoutLabels,
+    layout: 'versatile_full' as keyof typeof layoutLabels,
+    priceF5: '3000',
+    priceF7: '6000',
+    priceF11: '18000',
   });
 
   const totalRevenue = bookings
@@ -236,6 +239,11 @@ export default function AdminDashboard() {
       name: fieldForm.name,
       surface: fieldForm.surface,
       layout: fieldForm.layout,
+      prices: {
+        F5: fieldForm.layout === 'six_5' || fieldForm.layout === 'versatile_full' ? Number(fieldForm.priceF5) : undefined,
+        F7: fieldForm.layout === 'three_7' || fieldForm.layout === 'versatile_full' ? Number(fieldForm.priceF7) : undefined,
+        F11: fieldForm.layout === 'full_11' || fieldForm.layout === 'versatile_full' ? Number(fieldForm.priceF11) : undefined,
+      },
     });
 
     if (!created) {
@@ -248,7 +256,10 @@ export default function AdminDashboard() {
       club_id: clubs[0]?.id ?? '',
       name: '',
       surface: 'Gramilla sintética',
-      layout: 'playtomic_full',
+      layout: 'versatile_full',
+      priceF5: '3000',
+      priceF7: '6000',
+      priceF11: '18000',
     });
     toast.success('Campo creado correctamente.');
   };
@@ -831,6 +842,27 @@ export default function AdminDashboard() {
                         ))}
                       </SelectContent>
                     </Select>
+                  </div>
+                  <div className="space-y-4 rounded-2xl bg-muted/50 p-4">
+                    <p className="text-sm font-semibold text-foreground">Precios por hora (RD$)</p>
+                    {(fieldForm.layout === 'six_5' || fieldForm.layout === 'versatile_full') && (
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-medium text-muted-foreground uppercase">Fútbol 5</label>
+                        <Input type="number" placeholder="Precio F5" value={fieldForm.priceF5} onChange={(e) => setFieldForm(p => ({ ...p, priceF5: e.target.value }))} />
+                      </div>
+                    )}
+                    {(fieldForm.layout === 'three_7' || fieldForm.layout === 'versatile_full') && (
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-medium text-muted-foreground uppercase">Fútbol 7</label>
+                        <Input type="number" placeholder="Precio F7" value={fieldForm.priceF7} onChange={(e) => setFieldForm(p => ({ ...p, priceF7: e.target.value }))} />
+                      </div>
+                    )}
+                    {(fieldForm.layout === 'full_11' || fieldForm.layout === 'versatile_full') && (
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-medium text-muted-foreground uppercase">Fútbol 11</label>
+                        <Input type="number" placeholder="Precio F11" value={fieldForm.priceF11} onChange={(e) => setFieldForm(p => ({ ...p, priceF11: e.target.value }))} />
+                      </div>
+                    )}
                   </div>
                   <div className="rounded-xl border border-border bg-muted/50 p-3 text-sm text-muted-foreground">
                     <strong className="text-foreground">Preview:</strong> {layoutLabels[fieldForm.layout]}

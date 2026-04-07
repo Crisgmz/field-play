@@ -48,7 +48,12 @@ interface CreateFieldInput {
   club_id: string;
   name: string;
   surface?: string;
-  layout: 'full_11' | 'three_7' | 'six_5' | 'playtomic_full';
+  layout: 'full_11' | 'three_7' | 'six_5' | 'versatile_full';
+  prices?: {
+    F5?: number;
+    F7?: number;
+    F11?: number;
+  };
 }
 
 interface UpdateFieldInput {
@@ -516,6 +521,23 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       await supabase.from('fields').delete().eq('id', data.id);
       return null;
     }
+
+    if (payload.prices) {
+      const priceEntries = Object.entries(payload.prices).filter(([_, val]) => val !== undefined);
+      if (priceEntries.length > 0) {
+        await Promise.all(
+          priceEntries.map(([type, price]) =>
+            supabase.from('pricing_rules').upsert({
+              club_id: payload.club_id,
+              field_type: type,
+              price_per_hour: price,
+              is_active: true,
+            }, { onConflict: 'club_id,field_type' })
+          )
+        );
+      }
+    }
+
     await reload();
 
     return {
