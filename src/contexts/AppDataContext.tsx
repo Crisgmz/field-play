@@ -7,6 +7,7 @@ import { Block, BlockType, Booking, BookingStatus, Club, Field, FieldType, Field
 
 interface CreateBookingInput {
   user_id: string;
+  club_id: string;
   field_unit_id: string;
   field_type: FieldType;
   date: string;
@@ -30,8 +31,17 @@ interface CreateClubInput {
   name: string;
   location: string;
   description: string;
-  price_per_hour: number;
   owner_id: string;
+}
+
+interface UpdateClubInput {
+  id: string;
+  name?: string;
+  location?: string;
+  description?: string;
+  open_time?: string;
+  close_time?: string;
+  is_active?: boolean;
 }
 
 interface CreateFieldInput {
@@ -39,6 +49,21 @@ interface CreateFieldInput {
   name: string;
   surface?: string;
   layout: 'full_11' | 'three_7' | 'six_5' | 'playtomic_full';
+}
+
+interface UpdateFieldInput {
+  id: string;
+  name?: string;
+  surface?: string;
+  is_active?: boolean;
+}
+
+interface UpdatePricingRuleInput {
+  id: string;
+  price_per_hour?: number;
+  minimum_minutes?: number;
+  increment_minutes?: number;
+  is_active?: boolean;
 }
 
 interface AppDataContextType {
@@ -54,7 +79,12 @@ interface AppDataContextType {
   createBlock: (payload: CreateBlockInput) => Promise<Block | null>;
   deleteBlock: (blockId: string) => Promise<void>;
   createClub: (payload: CreateClubInput) => Promise<Club | null>;
+  updateClub: (payload: UpdateClubInput) => Promise<boolean>;
+  deleteClub: (clubId: string) => Promise<boolean>;
   createField: (payload: CreateFieldInput) => Promise<Field | null>;
+  updateField: (payload: UpdateFieldInput) => Promise<boolean>;
+  deleteField: (fieldId: string) => Promise<boolean>;
+  updatePricingRule: (payload: UpdatePricingRuleInput) => Promise<boolean>;
   clubCount: number;
   fieldCount: number;
   loading: boolean;
@@ -130,9 +160,9 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const [profilesRes, clubsRes, pricingRes, fieldsRes, unitsRes, bookingsRes, blocksRes, blockUnitsRes] = await Promise.all([
       supabase.from('profiles').select('id, email, first_name, last_name, phone, national_id, role'),
       supabase.from('clubs').select('*').order('created_at', { ascending: false }),
-      supabase.from('pricing_rules').select('*').eq('is_active', true),
-      supabase.from('fields').select('*').eq('is_active', true).order('created_at', { ascending: false }),
-      supabase.from('field_units').select('*').eq('is_active', true),
+      supabase.from('pricing_rules').select('*'),
+      supabase.from('fields').select('*').order('created_at', { ascending: false }),
+      supabase.from('field_units').select('*'),
       supabase.from('bookings').select('*').order('date', { ascending: true }),
       supabase.from('blocks').select('*').order('date', { ascending: true }),
       supabase.from('block_units').select('*'),
@@ -146,6 +176,16 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       phone: item.phone,
       national_id: item.national_id,
       role: item.role,
+    }));
+
+    const pricingData: PricingRule[] = (pricingRes.data ?? []).map((item) => ({
+      id: item.id,
+      club_id: item.club_id,
+      field_type: item.field_type,
+      price_per_hour: Number(item.price_per_hour),
+      minimum_minutes: item.minimum_minutes,
+      increment_minutes: item.increment_minutes,
+      is_active: item.is_active,
     }));
 
     const clubsData: Club[] = (clubsRes.data ?? []).map((item) => ({
@@ -208,6 +248,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const bookingsData: Booking[] = (bookingsRes.data ?? []).map((item) => ({
       id: item.id,
       user_id: item.user_id,
+      club_id: item.club_id,
       field_unit_id: item.field_unit_id,
       date: item.date,
       start_time: item.start_time,
@@ -217,16 +258,6 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       total_price: Number(item.total_price ?? 0),
       notes: item.notes ?? undefined,
       created_at: item.created_at,
-    }));
-
-    const pricingData: PricingRule[] = (pricingRes.data ?? []).map((item) => ({
-      id: item.id,
-      club_id: item.club_id,
-      field_type: item.field_type,
-      price_per_hour: Number(item.price_per_hour),
-      minimum_minutes: item.minimum_minutes,
-      increment_minutes: item.increment_minutes,
-      is_active: item.is_active,
     }));
 
     setProfiles(profilesData);
@@ -253,10 +284,22 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     reload();
   }, [user?.id]);
 
+  // ── BOOKINGS ───────────────────────────────────────────────
+
   const createBooking = async (payload: CreateBookingInput) => {
     const { data, error } = await supabase
       .from('bookings')
-      .insert({ ...payload, status: payload.status ?? 'confirmed' })
+      .insert({
+        user_id: payload.user_id,
+        club_id: payload.club_id,
+        field_unit_id: payload.field_unit_id,
+        field_type: payload.field_type,
+        date: payload.date,
+        start_time: payload.start_time,
+        end_time: payload.end_time,
+        total_price: payload.total_price,
+        status: payload.status ?? 'confirmed',
+      })
       .select('*')
       .single();
 
@@ -288,6 +331,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return {
       id: data.id,
       user_id: data.user_id,
+      club_id: data.club_id,
       field_unit_id: data.field_unit_id,
       date: data.date,
       start_time: data.start_time,
@@ -317,6 +361,8 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
     await reload();
   };
+
+  // ── BLOCKS ─────────────────────────────────────────────────
 
   const createBlock = async (payload: CreateBlockInput) => {
     const { data, error } = await supabase
@@ -376,6 +422,8 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     await reload();
   };
 
+  // ── CLUBS ──────────────────────────────────────────────────
+
   const createClub = async (payload: CreateClubInput) => {
     const { data, error } = await supabase
       .from('clubs')
@@ -420,6 +468,29 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       is_active: data.is_active,
     };
   };
+
+  const updateClub = async (payload: UpdateClubInput) => {
+    const { id, ...updates } = payload;
+    const { error } = await supabase.from('clubs').update(updates).eq('id', id);
+    if (error) {
+      console.error('Error updating club:', error);
+      return false;
+    }
+    await reload();
+    return true;
+  };
+
+  const deleteClub = async (clubId: string) => {
+    const { error } = await supabase.from('clubs').update({ is_active: false }).eq('id', clubId);
+    if (error) {
+      console.error('Error deactivating club:', error);
+      return false;
+    }
+    await reload();
+    return true;
+  };
+
+  // ── FIELDS ─────────────────────────────────────────────────
 
   const createField = async (payload: CreateFieldInput) => {
     const { data, error } = await supabase
@@ -466,6 +537,42 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     };
   };
 
+  const updateField = async (payload: UpdateFieldInput) => {
+    const { id, ...updates } = payload;
+    const { error } = await supabase.from('fields').update(updates).eq('id', id);
+    if (error) {
+      console.error('Error updating field:', error);
+      return false;
+    }
+    await reload();
+    return true;
+  };
+
+  const deleteField = async (fieldId: string) => {
+    const { error } = await supabase.from('fields').update({ is_active: false }).eq('id', fieldId);
+    if (error) {
+      console.error('Error deactivating field:', error);
+      return false;
+    }
+    await reload();
+    return true;
+  };
+
+  // ── PRICING RULES ─────────────────────────────────────────
+
+  const updatePricingRule = async (payload: UpdatePricingRuleInput) => {
+    const { id, ...updates } = payload;
+    const { error } = await supabase.from('pricing_rules').update(updates).eq('id', id);
+    if (error) {
+      console.error('Error updating pricing rule:', error);
+      return false;
+    }
+    await reload();
+    return true;
+  };
+
+  // ── CONTEXT VALUE ──────────────────────────────────────────
+
   const value = useMemo(() => ({
     clubs,
     fields,
@@ -479,7 +586,12 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     createBlock,
     deleteBlock,
     createClub,
+    updateClub,
+    deleteClub,
     createField,
+    updateField,
+    deleteField,
+    updatePricingRule,
     clubCount: clubs.length,
     fieldCount: fields.length,
     loading,

@@ -103,6 +103,7 @@ export default function BookingFlow() {
 
     const created = await createBooking({
       user_id: user.id,
+      club_id: club.id,
       field_unit_id: unit.id,
       field_type: selectedMode,
       date: selectedDate,

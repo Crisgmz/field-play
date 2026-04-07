@@ -12,6 +12,7 @@ import {
   Building2,
   Map,
   Ban,
+  DollarSign,
   ListChecks,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -30,6 +31,7 @@ const adminSections = [
   { label: 'Bloqueos', icon: Ban, path: '/admin/blocks' },
   { label: 'Clubes', icon: Building2, path: '/admin/clubs' },
   { label: 'Campos', icon: Map, path: '/admin/fields' },
+  { label: 'Precios', icon: DollarSign, path: '/admin/pricing' },
 ];
 
 export default function AppLayout({ children }: { children: ReactNode }) {

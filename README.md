@@ -59,3 +59,13 @@ Ahora el frontend intenta disparar un correo de "reserva recibida" cuando una re
    supabase secrets set BOOKING_EMAIL_FROM="Field Play <reservas@tudominio.com>"
    ```
 4. Si no configuras esos secrets, la reserva se crea, pero el correo no se enviará.
+
+## Coolify
+Si despliegas con Coolify usando el `Dockerfile` de este repo, agrega estas variables como Build/Environment Variables y vuelve a desplegar:
+
+```env
+VITE_SUPABASE_URL=https://nvzjozachncgkuzlmxbk.supabase.co
+VITE_SUPABASE_ANON_KEY=sb_publishable_b3QCvZASFAbgtvVhJs2fxQ_5FcZwTUn
+```
+
+El `Dockerfile` ya quedó preparado para recibirlas en build time con `ARG`/`ENV`, que es necesario en Vite.

@@ -1,9 +1,16 @@
 import { Club } from '@/types';
 import { MapPin, Star } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { useAppData } from '@/contexts/AppDataContext';
 
 export default function ClubCard({ club }: { club: Club }) {
   const navigate = useNavigate();
+  const { pricingRules } = useAppData();
+
+  const clubRules = pricingRules.filter((r) => r.club_id === club.id && r.is_active);
+  const minPrice = clubRules.length > 0
+    ? Math.min(...clubRules.map((r) => r.price_per_hour))
+    : 0;
 
   return (
     <button
@@ -28,7 +35,8 @@ export default function ClubCard({ club }: { club: Club }) {
           {club.location}
         </div>
         <div className="mt-2 flex items-baseline gap-1">
-          <span className="font-heading text-lg font-bold text-primary">RD$ {club.price_per_hour.toLocaleString()}</span>
+          <span className="text-xs text-muted-foreground">Desde</span>
+          <span className="font-heading text-lg font-bold text-primary">RD$ {minPrice.toLocaleString()}</span>
           <span className="text-xs text-muted-foreground">/hora</span>
         </div>
       </div>

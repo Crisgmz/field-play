@@ -78,6 +78,7 @@ export type BookingStatus = 'pending' | 'confirmed' | 'cancelled';
 export interface Booking {
   id: string;
   user_id: string;
+  club_id: string;
   field_unit_id: string;
   date: string;
   start_time: string;

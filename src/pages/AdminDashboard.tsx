@@ -7,10 +7,15 @@ import {
   ChevronLeft,
   ChevronRight,
   DollarSign,
+  Edit2,
   Map,
+  Pencil,
   Plus,
+  Save,
   Shield,
+  Trash2,
   Users,
+  X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -21,7 +26,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Block, FieldType } from '@/types';
 import { TIME_SLOTS } from '@/data/mockData';
 
-const adminSections = ['overview', 'calendar', 'bookings', 'blocks', 'clubs', 'fields'] as const;
+const adminSections = ['overview', 'calendar', 'bookings', 'blocks', 'clubs', 'fields', 'pricing'] as const;
 type AdminSection = (typeof adminSections)[number];
 
 const layoutLabels = {
@@ -39,11 +44,16 @@ export default function AdminDashboard() {
     fields,
     bookings,
     blocks,
+    pricingRules,
     createBlock,
     deleteBlock,
     updateBookingStatus,
     createClub,
+    updateClub,
     createField,
+    updateField,
+    deleteField,
+    updatePricingRule,
     profiles,
   } = useAppData();
 
@@ -57,9 +67,18 @@ export default function AdminDashboard() {
   const [clubDialogOpen, setClubDialogOpen] = useState(false);
   const [fieldDialogOpen, setFieldDialogOpen] = useState(false);
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
+
+  // Edit states
+  const [editingClubId, setEditingClubId] = useState<string | null>(null);
+  const [editClubForm, setEditClubForm] = useState({ name: '', location: '', description: '', open_time: '', close_time: '' });
+  const [editingFieldId, setEditingFieldId] = useState<string | null>(null);
+  const [editFieldForm, setEditFieldForm] = useState({ name: '', surface: '' });
+  const [editingPricingId, setEditingPricingId] = useState<string | null>(null);
+  const [editPricingForm, setEditPricingForm] = useState({ price_per_hour: '', minimum_minutes: '' });
+
   const [blockForm, setBlockForm] = useState({
     field_id: fields[0]?.id ?? '',
-    unit_type: 'F11' as FieldType | 'all',
+    unit_type: 'all' as FieldType | 'all',
     date: new Date().toISOString().split('T')[0],
     start_time: '18:00',
     end_time: '20:00',
@@ -70,7 +89,6 @@ export default function AdminDashboard() {
     name: '',
     location: '',
     description: '',
-    price_per_hour: '2200',
   });
   const [fieldForm, setFieldForm] = useState({
     club_id: clubs[0]?.id ?? '',
@@ -132,28 +150,6 @@ export default function AdminDashboard() {
     ].sort((a, b) => a.time.localeCompare(b.time));
   };
 
-  const getGroupedDayEvents = (date: string) => {
-    const events = getDayEvents(date);
-    const groups = new Map<string, { kind: 'booking' | 'block'; time: string; endTime: string; labels: string[] }>();
-
-    for (const event of events) {
-      const key = `${event.kind}-${event.time}-${event.endTime}`;
-      const existing = groups.get(key);
-      if (existing) {
-        existing.labels.push(event.label);
-      } else {
-        groups.set(key, {
-          kind: event.kind,
-          time: event.time,
-          endTime: event.endTime,
-          labels: [event.label],
-        });
-      }
-    }
-
-    return Array.from(groups.values()).sort((a, b) => a.time.localeCompare(b.time));
-  };
-
   const latestBookings = useMemo(() => bookings.slice().sort((a, b) => (b.created_at || '').localeCompare(a.created_at || '')), [bookings]);
   const selectedBooking = bookings.find((booking) => booking.id === selectedBookingId) ?? null;
   const bookingOwner = selectedBooking
@@ -164,13 +160,17 @@ export default function AdminDashboard() {
     const field = fields.find((item) => item.id === blockForm.field_id);
     if (!field) return;
 
-    let unitIds: string[] = [];
-    if (blockForm.unit_type === 'all' || blockForm.unit_type === 'F11') {
-      unitIds = field.units.filter((unit) => unit.type === 'F11').map((unit) => unit.id);
-    } else if (blockForm.unit_type === 'F7') {
-      unitIds = field.units.filter((unit) => unit.type === 'F7').map((unit) => unit.id);
+    let unitIds: string[];
+    if (blockForm.unit_type === 'all') {
+      // Bloquear TODAS las unidades del campo
+      unitIds = field.units.map((unit) => unit.id);
     } else {
-      unitIds = field.units.filter((unit) => unit.type === 'F5').map((unit) => unit.id);
+      unitIds = field.units.filter((unit) => unit.type === blockForm.unit_type).map((unit) => unit.id);
+    }
+
+    if (unitIds.length === 0) {
+      toast.error('No hay unidades para bloquear en este campo.');
+      return;
     }
 
     const created = await createBlock({
@@ -200,7 +200,6 @@ export default function AdminDashboard() {
       name: clubForm.name,
       location: clubForm.location,
       description: clubForm.description,
-      price_per_hour: Number(clubForm.price_per_hour),
       owner_id: user.id,
     });
 
@@ -210,8 +209,25 @@ export default function AdminDashboard() {
     }
 
     setClubDialogOpen(false);
-    setClubForm({ name: '', location: '', description: '', price_per_hour: '2200' });
+    setClubForm({ name: '', location: '', description: '' });
     toast.success('Club creado correctamente.');
+  };
+
+  const handleUpdateClub = async (clubId: string) => {
+    const success = await updateClub({
+      id: clubId,
+      name: editClubForm.name,
+      location: editClubForm.location,
+      description: editClubForm.description,
+      open_time: editClubForm.open_time,
+      close_time: editClubForm.close_time,
+    });
+    if (success) {
+      setEditingClubId(null);
+      toast.success('Club actualizado.');
+    } else {
+      toast.error('Error al actualizar el club.');
+    }
   };
 
   const handleCreateField = async () => {
@@ -237,6 +253,43 @@ export default function AdminDashboard() {
     toast.success('Campo creado correctamente.');
   };
 
+  const handleUpdateField = async (fieldId: string) => {
+    const success = await updateField({
+      id: fieldId,
+      name: editFieldForm.name,
+      surface: editFieldForm.surface,
+    });
+    if (success) {
+      setEditingFieldId(null);
+      toast.success('Campo actualizado.');
+    } else {
+      toast.error('Error al actualizar el campo.');
+    }
+  };
+
+  const handleDeleteField = async (fieldId: string) => {
+    const success = await deleteField(fieldId);
+    if (success) {
+      toast.success('Campo desactivado.');
+    } else {
+      toast.error('Error al desactivar el campo.');
+    }
+  };
+
+  const handleUpdatePricing = async (ruleId: string) => {
+    const success = await updatePricingRule({
+      id: ruleId,
+      price_per_hour: Number(editPricingForm.price_per_hour),
+      minimum_minutes: Number(editPricingForm.minimum_minutes),
+    });
+    if (success) {
+      setEditingPricingId(null);
+      toast.success('Precio actualizado.');
+    } else {
+      toast.error('Error al actualizar el precio.');
+    }
+  };
+
   const titles: Record<AdminSection, string> = {
     overview: 'Resumen general',
     calendar: 'Calendario operativo',
@@ -244,6 +297,16 @@ export default function AdminDashboard() {
     blocks: 'Bloqueos y mantenimiento',
     clubs: 'Clubes',
     fields: 'Campos y unidades',
+    pricing: 'Precios por tipo de cancha',
+  };
+
+  const getClubPrices = (clubId: string) => {
+    const rules = pricingRules.filter((r) => r.club_id === clubId && r.is_active);
+    return {
+      F5: rules.find((r) => r.field_type === 'F5')?.price_per_hour ?? 0,
+      F7: rules.find((r) => r.field_type === 'F7')?.price_per_hour ?? 0,
+      F11: rules.find((r) => r.field_type === 'F11')?.price_per_hour ?? 0,
+    };
   };
 
   const renderSection = () => {
@@ -341,13 +404,7 @@ export default function AdminDashboard() {
 
               {weekDates.filter((date) => date === (selectedMobileCalendarDate ?? weekDates[0])).map((date) => {
                 const dateObj = new Date(`${date}T00:00:00`);
-                const dayEvents = displayHours.flatMap((time) => {
-                  const { cellBookings, cellBlocks } = getEventsForCell(date, time);
-                  return [
-                    ...cellBookings.map((booking) => ({ kind: 'booking' as const, time, label: `${booking.field_type} · Reserva` })),
-                    ...cellBlocks.map((block) => ({ kind: 'block' as const, time, label: block.reason })),
-                  ];
-                });
+                const dayEvents = getDayEvents(date);
 
                 return (
                   <div key={date} className="rounded-xl sm:rounded-2xl border border-border bg-card p-3 sm:p-6 shadow-sm">
@@ -468,7 +525,7 @@ export default function AdminDashboard() {
                 <div key={booking.id} className="rounded-2xl border border-border bg-card p-4 shadow-sm">
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <p className="font-mono text-xs text-muted-foreground">{booking.id}</p>
+                      <p className="font-mono text-xs text-muted-foreground">{booking.id.slice(0, 8)}</p>
                       <h3 className="mt-1 font-heading text-lg font-bold text-foreground">{booking.field_type}</h3>
                     </div>
                     <span className={booking.status === 'confirmed'
@@ -516,7 +573,7 @@ export default function AdminDashboard() {
                   <tbody>
                     {bookings.map((booking) => (
                       <tr key={booking.id} className="border-t border-border">
-                        <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{booking.id}</td>
+                        <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{booking.id.slice(0, 8)}</td>
                         <td className="px-4 py-3">{booking.date}</td>
                         <td className="px-4 py-3">{booking.start_time} – {booking.end_time}</td>
                         <td className="px-4 py-3">{booking.field_type}</td>
@@ -574,10 +631,10 @@ export default function AdminDashboard() {
                     <Select value={blockForm.unit_type} onValueChange={(value) => setBlockForm((prev) => ({ ...prev, unit_type: value as FieldType | 'all' }))}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="all">Cancha completa / principal</SelectItem>
-                        <SelectItem value="F11">F11</SelectItem>
-                        <SelectItem value="F7">F7</SelectItem>
-                        <SelectItem value="F5">F5</SelectItem>
+                        <SelectItem value="all">Todas las unidades (cancha completa)</SelectItem>
+                        <SelectItem value="F11">Solo F11</SelectItem>
+                        <SelectItem value="F7">Solo F7</SelectItem>
+                        <SelectItem value="F5">Solo F5</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -613,24 +670,32 @@ export default function AdminDashboard() {
             </Dialog>
 
             <div className="space-y-3">
-              {blocks.map((block) => (
-                <div key={block.id} className="rounded-2xl border border-border bg-card p-4 shadow-sm">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <h3 className="font-heading text-sm font-bold text-card-foreground">{block.reason}</h3>
-                      <p className="mt-1 text-xs text-muted-foreground">{block.date} · {block.start_time} – {block.end_time}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">Unidades afectadas: {block.field_unit_ids.length}</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="rounded-full bg-destructive px-2 py-1 text-[10px] font-bold text-destructive-foreground">{block.type}</span>
-                      <Button variant="ghost" size="sm" onClick={() => {
-                        void deleteBlock(block.id);
-                        toast.success('Bloqueo eliminado.');
-                      }}>Eliminar</Button>
+              {blocks.length === 0 && <p className="text-sm text-muted-foreground">No hay bloqueos activos.</p>}
+              {blocks.map((block) => {
+                const blockField = fields.find((f) => f.id === block.field_id);
+                const blockClub = clubs.find((c) => c.id === blockField?.club_id);
+                return (
+                  <div key={block.id} className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <h3 className="font-heading text-sm font-bold text-card-foreground">{block.reason}</h3>
+                        <p className="mt-1 text-xs text-muted-foreground">{blockClub?.name} · {blockField?.name}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{block.date} · {block.start_time} – {block.end_time}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">Unidades afectadas: {block.field_unit_ids.length}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="rounded-full bg-destructive px-2 py-1 text-[10px] font-bold text-destructive-foreground">{block.type}</span>
+                        <Button variant="ghost" size="sm" onClick={() => {
+                          void deleteBlock(block.id);
+                          toast.success('Bloqueo eliminado.');
+                        }}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         );
@@ -645,29 +710,90 @@ export default function AdminDashboard() {
               <DialogContent>
                 <DialogHeader>
                   <DialogTitle>Crear club</DialogTitle>
+                  <DialogDescription>Al crear un club se generan automáticamente precios por defecto para F5, F7 y F11.</DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4">
                   <Input placeholder="Nombre del club" value={clubForm.name} onChange={(event) => setClubForm((prev) => ({ ...prev, name: event.target.value }))} />
                   <Input placeholder="Ubicación" value={clubForm.location} onChange={(event) => setClubForm((prev) => ({ ...prev, location: event.target.value }))} />
                   <Input placeholder="Descripción" value={clubForm.description} onChange={(event) => setClubForm((prev) => ({ ...prev, description: event.target.value }))} />
-                  <Input placeholder="Precio por hora" type="number" value={clubForm.price_per_hour} onChange={(event) => setClubForm((prev) => ({ ...prev, price_per_hour: event.target.value }))} />
                   <Button className="w-full" onClick={handleCreateClub}>Guardar club</Button>
                 </div>
               </DialogContent>
             </Dialog>
 
             <div className="grid gap-4 md:grid-cols-2">
-              {clubs.map((club) => (
-                <div key={club.id} className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-                  <h3 className="font-heading text-lg font-bold text-card-foreground">{club.name}</h3>
-                  <p className="mt-1 text-sm text-muted-foreground">{club.location}</p>
-                  <p className="mt-3 text-sm text-muted-foreground">{club.description}</p>
-                  <div className="mt-4 flex items-center justify-between text-sm">
-                    <span className="text-primary font-semibold">RD$ {club.price_per_hour.toLocaleString()} / hora</span>
-                    <span className="rounded-full bg-muted px-2 py-1 text-xs text-foreground">{club.open_time} - {club.close_time}</span>
+              {clubs.map((club) => {
+                const prices = getClubPrices(club.id);
+                const isEditing = editingClubId === club.id;
+
+                return (
+                  <div key={club.id} className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+                    {isEditing ? (
+                      <div className="space-y-3">
+                        <Input value={editClubForm.name} onChange={(e) => setEditClubForm((p) => ({ ...p, name: e.target.value }))} placeholder="Nombre" />
+                        <Input value={editClubForm.location} onChange={(e) => setEditClubForm((p) => ({ ...p, location: e.target.value }))} placeholder="Ubicación" />
+                        <Input value={editClubForm.description} onChange={(e) => setEditClubForm((p) => ({ ...p, description: e.target.value }))} placeholder="Descripción" />
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="mb-1 block text-xs text-muted-foreground">Apertura</label>
+                            <Input type="time" value={editClubForm.open_time} onChange={(e) => setEditClubForm((p) => ({ ...p, open_time: e.target.value }))} />
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-xs text-muted-foreground">Cierre</label>
+                            <Input type="time" value={editClubForm.close_time} onChange={(e) => setEditClubForm((p) => ({ ...p, close_time: e.target.value }))} />
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button size="sm" onClick={() => void handleUpdateClub(club.id)}><Save className="mr-1 h-3 w-3" />Guardar</Button>
+                          <Button size="sm" variant="ghost" onClick={() => setEditingClubId(null)}><X className="mr-1 h-3 w-3" />Cancelar</Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <h3 className="font-heading text-lg font-bold text-card-foreground">{club.name}</h3>
+                            <p className="mt-1 text-sm text-muted-foreground">{club.location}</p>
+                          </div>
+                          <Button variant="ghost" size="sm" onClick={() => {
+                            setEditingClubId(club.id);
+                            setEditClubForm({
+                              name: club.name,
+                              location: club.location,
+                              description: club.description,
+                              open_time: club.open_time,
+                              close_time: club.close_time,
+                            });
+                          }}>
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                        </div>
+                        <p className="mt-3 text-sm text-muted-foreground">{club.description}</p>
+                        <div className="mt-4 space-y-2">
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="text-muted-foreground">F5</span>
+                            <span className="font-semibold text-foreground">RD$ {prices.F5.toLocaleString()} / hora</span>
+                          </div>
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="text-muted-foreground">F7</span>
+                            <span className="font-semibold text-foreground">RD$ {prices.F7.toLocaleString()} / hora</span>
+                          </div>
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="text-muted-foreground">F11</span>
+                            <span className="font-semibold text-foreground">RD$ {prices.F11.toLocaleString()} / hora</span>
+                          </div>
+                        </div>
+                        <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
+                          <span>{club.open_time} - {club.close_time}</span>
+                          <span className={club.is_active ? 'text-emerald-600' : 'text-destructive'}>
+                            {club.is_active ? 'Activo' : 'Inactivo'}
+                          </span>
+                        </div>
+                      </>
+                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         );
@@ -719,45 +845,172 @@ export default function AdminDashboard() {
               const f11 = field.units.filter((unit) => unit.type === 'F11');
               const f7 = field.units.filter((unit) => unit.type === 'F7');
               const f5 = field.units.filter((unit) => unit.type === 'F5');
+              const isEditing = editingFieldId === field.id;
 
               return (
                 <div key={field.id} className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <h3 className="font-heading text-base font-bold text-card-foreground">{club?.name} · {field.name}</h3>
-                      <p className="mt-1 text-xs text-muted-foreground">{field.surface}</p>
+                  {isEditing ? (
+                    <div className="space-y-3">
+                      <Input value={editFieldForm.name} onChange={(e) => setEditFieldForm((p) => ({ ...p, name: e.target.value }))} placeholder="Nombre del campo" />
+                      <Input value={editFieldForm.surface} onChange={(e) => setEditFieldForm((p) => ({ ...p, surface: e.target.value }))} placeholder="Superficie" />
+                      <div className="flex gap-2">
+                        <Button size="sm" onClick={() => void handleUpdateField(field.id)}><Save className="mr-1 h-3 w-3" />Guardar</Button>
+                        <Button size="sm" variant="ghost" onClick={() => setEditingFieldId(null)}><X className="mr-1 h-3 w-3" />Cancelar</Button>
+                      </div>
                     </div>
-                    <span className="rounded-full bg-primary px-2 py-1 text-xs font-semibold text-primary-foreground">{field.units.length} unidades</span>
-                  </div>
+                  ) : (
+                    <>
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <h3 className="font-heading text-base font-bold text-card-foreground">{club?.name} · {field.name}</h3>
+                          <p className="mt-1 text-xs text-muted-foreground">{field.surface}</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="rounded-full bg-primary px-2 py-1 text-xs font-semibold text-primary-foreground">{field.units.length} unidades</span>
+                          <Button variant="ghost" size="sm" onClick={() => {
+                            setEditingFieldId(field.id);
+                            setEditFieldForm({ name: field.name, surface: field.surface ?? '' });
+                          }}>
+                            <Edit2 className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={() => void handleDeleteField(field.id)}>
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </div>
+                      </div>
 
-                  <div className="mt-4 grid gap-3 md:grid-cols-3">
-                    <div className="rounded-xl border border-border p-4 text-sm">
-                      <p className="text-xs uppercase tracking-wide text-muted-foreground">F11</p>
-                      <p className="mt-1 text-xl font-bold text-foreground">{f11.length}</p>
-                    </div>
-                    <div className="rounded-xl border border-border p-4 text-sm">
-                      <p className="text-xs uppercase tracking-wide text-muted-foreground">F7</p>
-                      <p className="mt-1 text-xl font-bold text-foreground">{f7.length}</p>
-                    </div>
-                    <div className="rounded-xl border border-border p-4 text-sm">
-                      <p className="text-xs uppercase tracking-wide text-muted-foreground">F5</p>
-                      <p className="mt-1 text-xl font-bold text-foreground">{f5.length}</p>
-                    </div>
-                  </div>
+                      <div className="mt-4 grid gap-3 md:grid-cols-3">
+                        <div className="rounded-xl border border-border p-4 text-sm">
+                          <p className="text-xs uppercase tracking-wide text-muted-foreground">F11</p>
+                          <p className="mt-1 text-xl font-bold text-foreground">{f11.length}</p>
+                        </div>
+                        <div className="rounded-xl border border-border p-4 text-sm">
+                          <p className="text-xs uppercase tracking-wide text-muted-foreground">F7</p>
+                          <p className="mt-1 text-xl font-bold text-foreground">{f7.length}</p>
+                        </div>
+                        <div className="rounded-xl border border-border p-4 text-sm">
+                          <p className="text-xs uppercase tracking-wide text-muted-foreground">F5</p>
+                          <p className="mt-1 text-xl font-bold text-foreground">{f5.length}</p>
+                        </div>
+                      </div>
 
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {field.units.map((unit) => (
-                      <span
-                        key={unit.id}
-                        className={unit.type === 'F11'
-                          ? 'rounded-full px-3 py-1 text-xs font-semibold field-badge-11'
-                          : unit.type === 'F7'
-                            ? 'rounded-full px-3 py-1 text-xs font-semibold field-badge-7'
-                            : 'rounded-full px-3 py-1 text-xs font-semibold field-badge-5'}
-                      >
-                        {unit.name}
-                      </span>
-                    ))}
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        {field.units.map((unit) => (
+                          <span
+                            key={unit.id}
+                            className={unit.type === 'F11'
+                              ? 'rounded-full px-3 py-1 text-xs font-semibold field-badge-11'
+                              : unit.type === 'F7'
+                                ? 'rounded-full px-3 py-1 text-xs font-semibold field-badge-7'
+                                : 'rounded-full px-3 py-1 text-xs font-semibold field-badge-5'}
+                          >
+                            {unit.name}
+                          </span>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        );
+
+      case 'pricing':
+        return (
+          <div className="space-y-6">
+            <p className="text-sm text-muted-foreground">
+              Configura el precio por hora, duración mínima e incremento para cada tipo de cancha por club.
+            </p>
+
+            {clubs.map((club) => {
+              const clubRules = pricingRules.filter((r) => r.club_id === club.id);
+              if (clubRules.length === 0) return null;
+
+              return (
+                <div key={club.id} className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+                  <h3 className="font-heading text-lg font-bold text-card-foreground mb-4">{club.name}</h3>
+
+                  <div className="grid gap-3 md:grid-cols-3">
+                    {(['F5', 'F7', 'F11'] as FieldType[]).map((fieldType) => {
+                      const rule = clubRules.find((r) => r.field_type === fieldType);
+                      if (!rule) return null;
+
+                      const isEditing = editingPricingId === rule.id;
+
+                      return (
+                        <div key={rule.id} className="rounded-xl border border-border p-4">
+                          <div className="flex items-center justify-between mb-3">
+                            <span className={`rounded-full px-3 py-1 text-xs font-bold ${
+                              fieldType === 'F11' ? 'field-badge-11' : fieldType === 'F7' ? 'field-badge-7' : 'field-badge-5'
+                            }`}>
+                              {fieldType}
+                            </span>
+                            {!isEditing && (
+                              <Button variant="ghost" size="sm" onClick={() => {
+                                setEditingPricingId(rule.id);
+                                setEditPricingForm({
+                                  price_per_hour: String(rule.price_per_hour),
+                                  minimum_minutes: String(rule.minimum_minutes),
+                                });
+                              }}>
+                                <Pencil className="h-3 w-3" />
+                              </Button>
+                            )}
+                          </div>
+
+                          {isEditing ? (
+                            <div className="space-y-2">
+                              <div>
+                                <label className="text-xs text-muted-foreground">Precio / hora (RD$)</label>
+                                <Input
+                                  type="number"
+                                  value={editPricingForm.price_per_hour}
+                                  onChange={(e) => setEditPricingForm((p) => ({ ...p, price_per_hour: e.target.value }))}
+                                />
+                              </div>
+                              <div>
+                                <label className="text-xs text-muted-foreground">Mínimo (minutos)</label>
+                                <Select value={editPricingForm.minimum_minutes} onValueChange={(v) => setEditPricingForm((p) => ({ ...p, minimum_minutes: v }))}>
+                                  <SelectTrigger><SelectValue /></SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="30">30 min</SelectItem>
+                                    <SelectItem value="60">60 min</SelectItem>
+                                    <SelectItem value="90">90 min</SelectItem>
+                                    <SelectItem value="120">120 min</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div className="flex gap-2 pt-1">
+                                <Button size="sm" onClick={() => void handleUpdatePricing(rule.id)}><Save className="mr-1 h-3 w-3" />Guardar</Button>
+                                <Button size="sm" variant="ghost" onClick={() => setEditingPricingId(null)}><X className="mr-1 h-3 w-3" />Cancelar</Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="space-y-1.5">
+                              <div className="flex justify-between text-sm">
+                                <span className="text-muted-foreground">Precio/hora</span>
+                                <span className="font-semibold text-foreground">RD$ {rule.price_per_hour.toLocaleString()}</span>
+                              </div>
+                              <div className="flex justify-between text-sm">
+                                <span className="text-muted-foreground">Mínimo</span>
+                                <span className="font-medium text-foreground">{rule.minimum_minutes} min</span>
+                              </div>
+                              <div className="flex justify-between text-sm">
+                                <span className="text-muted-foreground">Incremento</span>
+                                <span className="font-medium text-foreground">{rule.increment_minutes} min</span>
+                              </div>
+                              <div className="flex justify-between text-sm">
+                                <span className="text-muted-foreground">Estado</span>
+                                <span className={rule.is_active ? 'text-emerald-600 font-medium' : 'text-destructive font-medium'}>
+                                  {rule.is_active ? 'Activo' : 'Inactivo'}
+                                </span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               );

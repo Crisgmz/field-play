@@ -50,7 +50,7 @@ export interface Database {
           id: string;
           club_id: string;
           name: string;
-          surface: string | null;
+          surface: string;
           is_active: boolean;
           created_at: string;
           updated_at: string;
@@ -66,6 +66,7 @@ export interface Database {
           slot_ids: string[];
           is_active: boolean;
           created_at: string;
+          updated_at: string;
         };
       };
       blocks: {
@@ -79,12 +80,21 @@ export interface Database {
           reason: string;
           created_by: string | null;
           created_at: string;
+          updated_at: string;
+        };
+      };
+      block_units: {
+        Row: {
+          id: string;
+          block_id: string;
+          field_unit_id: string;
         };
       };
       bookings: {
         Row: {
           id: string;
           user_id: string;
+          club_id: string;
           field_unit_id: string;
           date: string;
           start_time: string;

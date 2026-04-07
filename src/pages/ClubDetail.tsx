@@ -6,7 +6,7 @@ import { MapPin, Star, ArrowLeft, Clock, Users } from 'lucide-react';
 export default function ClubDetail() {
   const { clubId } = useParams();
   const navigate = useNavigate();
-  const { clubs, fields } = useAppData();
+  const { clubs, fields, pricingRules } = useAppData();
 
   const club = clubs.find((item) => item.id === clubId);
   const field = fields.find((item) => item.club_id === clubId);
@@ -23,6 +23,11 @@ export default function ClubDetail() {
   const f11Units = field?.units.filter((u) => u.type === 'F11').length ?? 0;
   const f7Units = field?.units.filter((u) => u.type === 'F7').length ?? 0;
   const f5Units = field?.units.filter((u) => u.type === 'F5').length ?? 0;
+
+  const clubPrices = pricingRules.filter((r) => r.club_id === clubId && r.is_active);
+  const priceF5 = clubPrices.find((r) => r.field_type === 'F5')?.price_per_hour ?? 0;
+  const priceF7 = clubPrices.find((r) => r.field_type === 'F7')?.price_per_hour ?? 0;
+  const priceF11 = clubPrices.find((r) => r.field_type === 'F11')?.price_per_hour ?? 0;
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -43,9 +48,10 @@ export default function ClubDetail() {
                 <span className="flex items-center gap-1"><Star className="h-3.5 w-3.5 fill-[#f89217] text-[#f89217]" />{club.rating}</span>
               </div>
             </div>
-            <div className="text-right">
-              <span className="font-heading text-2xl font-bold text-primary">RD$ {club.price_per_hour.toLocaleString()}</span>
-              <span className="text-xs text-muted-foreground">/hora</span>
+            <div className="text-right space-y-0.5">
+              {priceF5 > 0 && <div className="text-sm"><span className="text-muted-foreground">F5:</span> <span className="font-semibold text-primary">RD$ {priceF5.toLocaleString()}</span><span className="text-xs text-muted-foreground">/h</span></div>}
+              {priceF7 > 0 && <div className="text-sm"><span className="text-muted-foreground">F7:</span> <span className="font-semibold text-primary">RD$ {priceF7.toLocaleString()}</span><span className="text-xs text-muted-foreground">/h</span></div>}
+              {priceF11 > 0 && <div className="text-sm"><span className="text-muted-foreground">F11:</span> <span className="font-semibold text-primary">RD$ {priceF11.toLocaleString()}</span><span className="text-xs text-muted-foreground">/h</span></div>}
             </div>
           </div>
 
