@@ -227,11 +227,9 @@ create or replace function public.is_club_admin()
 returns boolean
 language sql
 security definer
+set search_path = public
 as $$
-  select exists (
-    select 1 from public.profiles
-    where id = auth.uid() and role = 'club_admin'
-  );
+  select (auth.jwt() -> 'user_metadata' ->> 'role') = 'club_admin';
 $$;
 
 alter table public.profiles enable row level security;
@@ -244,10 +242,15 @@ alter table public.block_units enable row level security;
 alter table public.bookings enable row level security;
 
 -- PROFILES
-drop policy if exists "profiles_select_own_or_admin" on public.profiles;
-create policy "profiles_select_own_or_admin"
+drop policy if exists "profiles_select_own" on public.profiles;
+create policy "profiles_select_own"
 on public.profiles for select
-using (auth.uid() = id or public.is_club_admin());
+using (auth.uid() = id);
+
+drop policy if exists "profiles_select_admin" on public.profiles;
+create policy "profiles_select_admin"
+on public.profiles for select
+using (public.is_club_admin());
 
 drop policy if exists "profiles_update_own" on public.profiles;
 create policy "profiles_update_own"

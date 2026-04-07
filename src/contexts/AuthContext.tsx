@@ -66,20 +66,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let mounted = true;
 
     const bootstrap = async () => {
-      const { data } = await supabase.auth.getSession();
-      const profile = await loadProfile(data.session);
-      if (!mounted) return;
-      setUser(profile);
-      setLoading(false);
+      try {
+        const { data, error } = await supabase.auth.getSession();
+        if (error) {
+          console.error("Error getting session:", error);
+        }
+        const profile = await loadProfile(data?.session || null);
+        if (!mounted) return;
+        setUser(profile);
+      } catch (err) {
+        console.error("Bootstrap error:", err);
+      } finally {
+        if (mounted) setLoading(false);
+      }
     };
 
     bootstrap();
 
     const { data: listener } = supabase.auth.onAuthStateChange(async (_event: AuthChangeEvent, session: Session | null) => {
-      const profile = await loadProfile(session);
-      if (!mounted) return;
-      setUser(profile);
-      setLoading(false);
+      try {
+        const profile = await loadProfile(session);
+        if (!mounted) return;
+        setUser(profile);
+      } catch (err) {
+        console.error("Auth state change error:", err);
+      } finally {
+        if (mounted) setLoading(false);
+      }
     });
 
     return () => {
@@ -99,7 +112,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     const profile = await refreshProfile();
-    return { ok: true, isAdmin: profile?.role === 'club_admin' };
+    if (!profile) {
+      return { ok: false, isAdmin: false, message: "Sesión iniciada pero no se pudo cargar tu perfil." };
+    }
+    return { ok: true, isAdmin: profile.role === 'club_admin' };
   };
 
   const register = async (payload: RegisterInput) => {
