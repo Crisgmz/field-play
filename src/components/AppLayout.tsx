@@ -14,6 +14,7 @@ import {
   Ban,
   DollarSign,
   ListChecks,
+  Settings,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
@@ -31,6 +32,7 @@ const adminSections = [
   { label: 'Bloqueos', icon: Ban, path: '/admin/blocks' },
   { label: 'Clubes', icon: Building2, path: '/admin/clubs' },
   { label: 'Campos', icon: Map, path: '/admin/fields' },
+  { label: 'Configuración', icon: Settings, path: '/admin/config' },
   { label: 'Precios', icon: DollarSign, path: '/admin/pricing' },
 ];
 

@@ -3,7 +3,10 @@ import { PHYSICAL_SLOTS } from '@/data/mockData';
 import { supabase } from '@/lib/supabase';
 import { sendBookingReceivedEmail } from '@/lib/bookingEmail';
 import { useAuth } from '@/contexts/AuthContext';
-import { Block, BlockType, Booking, BookingStatus, Club, Field, FieldType, FieldUnit, PhysicalSlotId, PricingRule, User } from '@/types';
+import { Block, BlockType, Booking, BookingStatus, Club, Field, FieldType, FieldUnit, PaymentMethod, PhysicalSlotId, PricingRule, User } from '@/types';
+import { VenueConfig } from '@/types/courtConfig';
+import type { Database } from '@/lib/supabase-types';
+import { createDefaultVenueConfig } from '@/lib/courtConfig';
 
 interface CreateBookingInput {
   user_id: string;
@@ -15,6 +18,9 @@ interface CreateBookingInput {
   end_time: string;
   total_price: number;
   status?: BookingStatus;
+  payment_method?: PaymentMethod;
+  payment_proof_path?: string | null;
+  notes?: string | null;
 }
 
 interface CreateBlockInput {
@@ -78,9 +84,11 @@ interface AppDataContextType {
   blocks: Block[];
   pricingRules: PricingRule[];
   profiles: User[];
+  venueConfigs: VenueConfig[];
   createBooking: (payload: CreateBookingInput) => Promise<Booking | null>;
   cancelBooking: (bookingId: string) => Promise<void>;
   updateBookingStatus: (bookingId: string, status: BookingStatus) => Promise<void>;
+  markBookingSeen: (bookingId: string) => Promise<void>;
   createBlock: (payload: CreateBlockInput) => Promise<Block | null>;
   deleteBlock: (blockId: string) => Promise<void>;
   createClub: (payload: CreateClubInput) => Promise<Club | null>;
@@ -90,6 +98,9 @@ interface AppDataContextType {
   updateField: (payload: UpdateFieldInput) => Promise<boolean>;
   deleteField: (fieldId: string) => Promise<boolean>;
   updatePricingRule: (payload: UpdatePricingRuleInput) => Promise<boolean>;
+  getVenueConfig: (clubId: string) => VenueConfig;
+  updateVenueConfig: (config: VenueConfig) => Promise<boolean>;
+  toggleFieldUnit: (unitId: string, active: boolean) => Promise<boolean>;
   clubCount: number;
   fieldCount: number;
   loading: boolean;
@@ -97,6 +108,8 @@ interface AppDataContextType {
 }
 
 const AppDataContext = createContext<AppDataContextType | undefined>(undefined);
+
+type BookingRow = Database['public']['Tables']['bookings']['Row'];
 
 interface FieldUnitInput {
   field_id: string;
@@ -157,12 +170,13 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [pricingRules, setPricingRules] = useState<PricingRule[]>([]);
   const [profiles, setProfiles] = useState<User[]>([]);
+  const [venueConfigs, setVenueConfigs] = useState<VenueConfig[]>([]);
   const [loading, setLoading] = useState(true);
 
   const reload = async () => {
     setLoading(true);
 
-    const [profilesRes, clubsRes, pricingRes, fieldsRes, unitsRes, bookingsRes, blocksRes, blockUnitsRes] = await Promise.all([
+    const [profilesRes, clubsRes, pricingRes, fieldsRes, unitsRes, bookingsRes, blocksRes, blockUnitsRes, venueConfigsRes] = await Promise.all([
       supabase.from('profiles').select('id, email, first_name, last_name, phone, national_id, role'),
       supabase.from('clubs').select('*').order('created_at', { ascending: false }),
       supabase.from('pricing_rules').select('*'),
@@ -171,6 +185,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       supabase.from('bookings').select('*').order('date', { ascending: true }),
       supabase.from('blocks').select('*').order('date', { ascending: true }),
       supabase.from('block_units').select('*'),
+      supabase.from('venue_configs').select('*'),
     ]);
 
     const profilesData: User[] = (profilesRes.data ?? []).map((item) => ({
@@ -244,8 +259,8 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       field_id: item.field_id,
       field_unit_ids: blockUnitMap.get(item.id) ?? [],
       date: item.date,
-      start_time: item.start_time,
-      end_time: item.end_time,
+      start_time: item.start_time.slice(0, 5),
+      end_time: item.end_time.slice(0, 5),
       type: item.type,
       reason: item.reason,
     }));
@@ -256,13 +271,22 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       club_id: item.club_id,
       field_unit_id: item.field_unit_id,
       date: item.date,
-      start_time: item.start_time,
-      end_time: item.end_time,
+      start_time: item.start_time.slice(0, 5),
+      end_time: item.end_time.slice(0, 5),
       status: item.status,
       field_type: item.field_type,
       total_price: Number(item.total_price ?? 0),
+      payment_method: (item.payment_method ?? 'bank_transfer') as PaymentMethod,
+      payment_proof_path: item.payment_proof_path,
+      admin_seen_at: item.admin_seen_at,
       notes: item.notes ?? undefined,
       created_at: item.created_at,
+    }));
+
+    const venueConfigsData: VenueConfig[] = (venueConfigsRes.data ?? []).map((item) => ({
+      clubId: item.club_id,
+      weekSchedule: item.week_schedule as VenueConfig['weekSchedule'],
+      slotDurationMinutes: item.slot_duration_minutes as VenueConfig['slotDurationMinutes'],
     }));
 
     setProfiles(profilesData);
@@ -271,6 +295,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setBlocks(blocksData);
     setBookings(bookingsData);
     setPricingRules(pricingData);
+    setVenueConfigs(venueConfigsData);
     setLoading(false);
   };
 
@@ -282,6 +307,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       setBlocks([]);
       setPricingRules([]);
       setProfiles([]);
+      setVenueConfigs([]);
       setLoading(false);
       return;
     }
@@ -292,21 +318,49 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
   // ── BOOKINGS ───────────────────────────────────────────────
 
   const createBooking = async (payload: CreateBookingInput) => {
-    const { data, error } = await supabase
-      .from('bookings')
-      .insert({
-        user_id: payload.user_id,
-        club_id: payload.club_id,
-        field_unit_id: payload.field_unit_id,
-        field_type: payload.field_type,
-        date: payload.date,
-        start_time: payload.start_time,
-        end_time: payload.end_time,
-        total_price: payload.total_price,
-        status: payload.status ?? 'confirmed',
-      })
-      .select('*')
-      .single();
+    let data: BookingRow | null = null;
+    let error: { message?: string } | null = null;
+
+    // Phase 1: prefer the transactional RPC when deployed.
+    const rpcResult = await supabase.rpc('rpc_create_booking', {
+      p_user_id: payload.user_id,
+      p_club_id: payload.club_id,
+      p_field_unit_id: payload.field_unit_id,
+      p_field_type: payload.field_type,
+      p_date: payload.date,
+      p_start_time: payload.start_time,
+      p_end_time: payload.end_time,
+      p_total_price: payload.total_price,
+      p_status: payload.status ?? 'pending',
+      p_payment_method: payload.payment_method ?? 'bank_transfer',
+      p_payment_proof_path: payload.payment_proof_path ?? null,
+      p_notes: payload.notes ?? null,
+    });
+
+    if (!rpcResult.error && rpcResult.data) {
+      data = rpcResult.data as BookingRow;
+    } else {
+      // Fallback for local/dev environments where the migration hasn't been applied yet.
+      const insertResult = await supabase
+        .from('bookings')
+        .insert({
+          user_id: payload.user_id,
+          club_id: payload.club_id,
+          field_unit_id: payload.field_unit_id,
+          field_type: payload.field_type,
+          date: payload.date,
+          start_time: payload.start_time,
+          end_time: payload.end_time,
+          total_price: payload.total_price,
+          status: payload.status ?? 'pending',
+          payment_method: payload.payment_method ?? 'bank_transfer',
+          payment_proof_path: payload.payment_proof_path ?? null,
+        })
+        .select('*')
+        .single();
+      data = insertResult.data;
+      error = insertResult.error;
+    }
 
     if (error || !data) return null;
 
@@ -344,6 +398,9 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       status: data.status,
       field_type: data.field_type,
       total_price: Number(data.total_price ?? 0),
+      payment_method: (data.payment_method ?? 'bank_transfer') as PaymentMethod,
+      payment_proof_path: data.payment_proof_path ?? null,
+      admin_seen_at: data.admin_seen_at ?? null,
       notes: data.notes ?? undefined,
       created_at: data.created_at,
     };
@@ -365,6 +422,25 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       return;
     }
     await reload();
+  };
+
+  const markBookingSeen = async (bookingId: string) => {
+    const booking = bookings.find((item) => item.id === bookingId);
+    if (!booking || booking.admin_seen_at) return;
+
+    const { error } = await supabase
+      .from('bookings')
+      .update({ admin_seen_at: new Date().toISOString() })
+      .eq('id', bookingId);
+
+    if (error) {
+      console.error('Error marking booking as seen:', error);
+      return;
+    }
+
+    setBookings((current) => current.map((item) => (
+      item.id === bookingId ? { ...item, admin_seen_at: new Date().toISOString() } : item
+    )));
   };
 
   // ── BLOCKS ─────────────────────────────────────────────────
@@ -593,6 +669,46 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return true;
   };
 
+  // ── VENUE CONFIG ───────────────────────────────────────────
+
+  const getVenueConfig = (clubId: string): VenueConfig => {
+    const existing = venueConfigs.find((vc) => vc.clubId === clubId);
+    if (existing) return existing;
+    return createDefaultVenueConfig(clubId);
+  };
+
+  const updateVenueConfig = async (config: VenueConfig): Promise<boolean> => {
+    const { error } = await supabase.from('venue_configs').upsert({
+      club_id: config.clubId,
+      week_schedule: config.weekSchedule,
+      slot_duration_minutes: config.slotDurationMinutes,
+    }, { onConflict: 'club_id' });
+
+    if (error) {
+      console.error('Error updating venue config:', error);
+      return false;
+    }
+
+    setVenueConfigs((current) => (
+      current.some((vc) => vc.clubId === config.clubId)
+        ? current.map((vc) => (vc.clubId === config.clubId ? config : vc))
+        : [...current, config]
+    ));
+    return true;
+  };
+
+  // ── FIELD UNIT TOGGLE ─────────────────────────────────────
+
+  const toggleFieldUnit = async (unitId: string, active: boolean): Promise<boolean> => {
+    const { error } = await supabase.from('field_units').update({ is_active: active }).eq('id', unitId);
+    if (error) {
+      console.error('Error toggling field unit:', error);
+      return false;
+    }
+    await reload();
+    return true;
+  };
+
   // ── CONTEXT VALUE ──────────────────────────────────────────
 
   const value = useMemo(() => ({
@@ -602,9 +718,11 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     blocks,
     pricingRules,
     profiles,
+    venueConfigs,
     createBooking,
     cancelBooking,
     updateBookingStatus,
+    markBookingSeen,
     createBlock,
     deleteBlock,
     createClub,
@@ -614,11 +732,14 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     updateField,
     deleteField,
     updatePricingRule,
+    getVenueConfig,
+    updateVenueConfig,
+    toggleFieldUnit,
     clubCount: clubs.length,
     fieldCount: fields.length,
     loading,
     reload,
-  }), [clubs, fields, bookings, blocks, pricingRules, profiles, loading]);
+  }), [clubs, fields, bookings, blocks, pricingRules, profiles, venueConfigs, loading]);
 
   return <AppDataContext.Provider value={value}>{children}</AppDataContext.Provider>;
 };

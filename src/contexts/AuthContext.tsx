@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from '
 import { AuthChangeEvent, Session } from '@supabase/supabase-js';
 import { LoginInput, RegisterInput, User } from '@/types';
 import { supabase } from '@/lib/supabase';
+import { sendRegistrationWelcomeEmail } from '@/lib/bookingEmail';
 
 interface AuthContextType {
   user: User | null;
@@ -128,7 +129,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           last_name: payload.last_name.trim(),
           phone: payload.phone.trim(),
           national_id: payload.national_id?.trim() || '',
-          role: payload.role ?? 'client',
+          // SECURITY: Never trust client-supplied role. Always default to 'client'.
+          // Admin role must be granted server-side (e.g., via Supabase dashboard or admin API).
+          role: 'client',
         },
       },
     });
@@ -137,13 +140,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { ok: false, message: error.message };
     }
 
+    try {
+      await sendRegistrationWelcomeEmail({
+        email: payload.email.trim().toLowerCase(),
+        firstName: payload.first_name.trim(),
+        lastName: payload.last_name.trim(),
+      });
+    } catch (emailError) {
+      console.error('Could not send registration welcome email', emailError);
+    }
+
     const profile = await loadProfile(data.session ?? null);
     if (profile) setUser(profile);
 
     return {
       ok: true,
       user: profile ?? undefined,
-      message: data.session ? undefined : 'Cuenta creada. Revisa tu correo para confirmar el acceso.',
+      message: data.session
+        ? 'Cuenta creada correctamente.'
+        : 'Cuenta creada. Revisa tu correo: te enviamos un mensaje de bienvenida y el correo de confirmación para activar el acceso.',
     };
   };
 

@@ -148,6 +148,7 @@ export const mockBookings: Booking[] = [
   {
     id: 'b1',
     user_id: 'u1',
+    club_id: 'c1',
     field_unit_id: 'f1-f5-3',
     date: '2026-03-30',
     start_time: '18:00',
@@ -160,6 +161,7 @@ export const mockBookings: Booking[] = [
   {
     id: 'b2',
     user_id: 'u1',
+    club_id: 'c1',
     field_unit_id: 'f1-f5-6',
     date: '2026-03-30',
     start_time: '18:00',

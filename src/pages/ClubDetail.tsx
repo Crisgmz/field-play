@@ -9,7 +9,7 @@ export default function ClubDetail() {
   const { clubs, fields, pricingRules } = useAppData();
 
   const club = clubs.find((item) => item.id === clubId);
-  const field = fields.find((item) => item.club_id === clubId);
+  const clubFields = fields.filter((item) => item.club_id === clubId);
 
   if (!club) {
     return (
@@ -20,9 +20,10 @@ export default function ClubDetail() {
     );
   }
 
-  const f11Units = field?.units.filter((u) => u.type === 'F11').length ?? 0;
-  const f7Units = field?.units.filter((u) => u.type === 'F7').length ?? 0;
-  const f5Units = field?.units.filter((u) => u.type === 'F5').length ?? 0;
+  const allUnits = clubFields.flatMap((f) => f.units);
+  const f11Units = allUnits.filter((u) => u.type === 'F11').length;
+  const f7Units = allUnits.filter((u) => u.type === 'F7').length;
+  const f5Units = allUnits.filter((u) => u.type === 'F5').length;
 
   const clubPrices = pricingRules.filter((r) => r.club_id === clubId && r.is_active);
   const priceF5 = clubPrices.find((r) => r.field_type === 'F5')?.price_per_hour ?? 0;

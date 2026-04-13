@@ -1,7 +1,9 @@
-import { Block, Booking, Field, FieldType, PhysicalSlotId, SlotStatus, TimeSlot, UnitOption } from '@/types';
+import { Block, Booking, Club, Field, FieldType, PhysicalSlotId, SlotStatus, TimeSlot, UnitOption } from '@/types';
+import { VenueConfig } from '@/types/courtConfig';
 import { TIME_SLOTS } from '@/data/mockData';
+import { generateTimeSlots, getTimeSlotsForDate } from './courtConfig';
 
-function timeOverlaps(start1: string, end1: string, start2: string, end2: string): boolean {
+export function timeOverlaps(start1: string, end1: string, start2: string, end2: string): boolean {
   return start1 < end2 && end1 > start2;
 }
 
@@ -20,7 +22,7 @@ export function getOccupiedSlotIds(
   const occupied = new Set<PhysicalSlotId>();
 
   bookings
-    .filter((booking) => booking.date === date && booking.status === 'confirmed' && timeOverlaps(startTime, endTime, booking.start_time, booking.end_time))
+    .filter((booking) => booking.date === date && booking.status !== 'cancelled' && timeOverlaps(startTime, endTime, booking.start_time, booking.end_time))
     .forEach((booking) => {
       const unit = field.units.find((item) => item.id === booking.field_unit_id);
       unit?.slot_ids.forEach((slotId) => occupied.add(slotId));
@@ -61,12 +63,73 @@ export function getSlotStatuses(
   occupied: Set<PhysicalSlotId>,
   selectedSlots: PhysicalSlotId[] = [],
 ): SlotStatus[] {
-  return ['S1', 'S2', 'S3', 'S4', 'S5', 'S6'].map((slotId) => ({
+  return (['S1', 'S2', 'S3', 'S4', 'S5', 'S6'] as PhysicalSlotId[]).map((slotId) => ({
     id: slotId,
     occupied: occupied.has(slotId),
     selected: selectedSlots.includes(slotId),
   }));
 }
+
+// ── ENHANCED: Supports dynamic time slots from venue config ──
+
+/**
+ * Resolves the time slots to use for a given date/club.
+ * Prefers venue config → falls back to club hours → falls back to hardcoded TIME_SLOTS.
+ */
+export function resolveTimeSlots(
+  date: string,
+  club: Club | null,
+  venueConfig: VenueConfig | null,
+): string[] {
+  if (venueConfig) {
+    const slots = getTimeSlotsForDate(
+      date,
+      venueConfig,
+      club?.open_time ?? '08:00',
+      club?.close_time ?? '23:00',
+    );
+    return slots.length > 0 ? slots : [];
+  }
+
+  if (club) {
+    return generateTimeSlots(club.open_time, club.close_time);
+  }
+
+  return TIME_SLOTS;
+}
+
+/**
+ * Get available time slots using dynamic schedule.
+ * This is the v2 replacement for getAvailableTimeSlots that respects venue configs.
+ */
+export function getAvailableTimeSlotsV2(
+  date: string,
+  fieldType: FieldType,
+  field: Field,
+  bookings: Booking[],
+  blocks: Block[],
+  club: Club | null,
+  venueConfig: VenueConfig | null,
+): TimeSlot[] {
+  const timeSlots = resolveTimeSlots(date, club, venueConfig);
+  const totalUnits = getUnitsByType(field, fieldType).length;
+
+  return timeSlots.slice(0, -1).map((start, index) => {
+    const end = timeSlots[index + 1];
+    const availableUnits = getUnitOptions(date, start, end, fieldType, field, bookings, blocks)
+      .filter((option) => option.available).length;
+
+    return {
+      start,
+      end,
+      available: availableUnits > 0,
+      availableUnits,
+      totalUnits,
+    };
+  });
+}
+
+// ── LEGACY: Original function preserved for backward compatibility ──
 
 export function getAvailableTimeSlots(
   date: string,
@@ -103,4 +166,39 @@ export function findAvailableUnit(
 ) {
   return getUnitOptions(date, startTime, endTime, fieldType, field, bookings, blocks)
     .find((option) => option.available) ?? null;
+}
+
+// ── CONFLICT-AWARE AVAILABILITY ────────────────────────────
+// Shows which field types are still possible given current occupancy.
+
+export interface FieldTypeAvailability {
+  type: FieldType;
+  totalUnits: number;
+  availableUnits: number;
+  maxSimultaneous: number;
+}
+
+/**
+ * For a given time range on a field, returns availability broken down by field type.
+ * Useful for the admin dashboard to see at a glance what's bookable.
+ */
+export function getFieldTypeAvailability(
+  date: string,
+  startTime: string,
+  endTime: string,
+  field: Field,
+  bookings: Booking[],
+  blocks: Block[],
+): FieldTypeAvailability[] {
+  const types: FieldType[] = ['F11', 'F7', 'F5'];
+  return types.map((type) => {
+    const units = getUnitsByType(field, type);
+    const options = getUnitOptions(date, startTime, endTime, type, field, bookings, blocks);
+    return {
+      type,
+      totalUnits: units.length,
+      availableUnits: options.filter((o) => o.available).length,
+      maxSimultaneous: type === 'F11' ? 1 : type === 'F7' ? 3 : 6,
+    };
+  });
 }

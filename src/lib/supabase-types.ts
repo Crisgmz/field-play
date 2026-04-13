@@ -32,6 +32,15 @@ export interface Database {
           updated_at: string;
         };
       };
+      venue_configs: {
+        Row: {
+          club_id: string;
+          week_schedule: Json;
+          slot_duration_minutes: 30 | 60;
+          created_at: string;
+          updated_at: string;
+        };
+      };
       pricing_rules: {
         Row: {
           id: string;
@@ -102,6 +111,9 @@ export interface Database {
           status: 'pending' | 'confirmed' | 'cancelled';
           field_type: 'F5' | 'F7' | 'F11';
           total_price: number;
+          payment_method: 'bank_transfer';
+          payment_proof_path: string | null;
+          admin_seen_at: string | null;
           notes: string | null;
           created_at: string;
           updated_at: string;

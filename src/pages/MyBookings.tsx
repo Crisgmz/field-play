@@ -47,7 +47,7 @@ export default function MyBookings() {
                       : booking.status === 'cancelled'
                         ? 'bg-destructive/10 text-destructive'
                         : 'bg-secondary text-secondary-foreground'
-                  }`}>{booking.status}</span>
+                  }`}>{booking.status === 'confirmed' ? 'Confirmada' : booking.status === 'cancelled' ? 'Cancelada' : 'Pendiente de validación'}</span>
                   {booking.status === 'confirmed' && (
                     <Button variant="outline" size="sm" onClick={() => void cancelBooking(booking.id)}>
                       <Ban className="mr-2 h-4 w-4" />Cancelar

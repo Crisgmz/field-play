@@ -14,6 +14,7 @@ interface BookingEmailRequest {
   formattedDate?: string;
   startTime?: string;
   endTime?: string;
+  paymentMethod?: string;
 }
 
 const htmlTemplate = ({
@@ -29,21 +30,28 @@ const htmlTemplate = ({
   const bookingMeta = [
     clubName ? `<li><strong>Club:</strong> ${clubName}</li>` : '',
     fieldName ? `<li><strong>Cancha:</strong> ${fieldName}</li>` : '',
-    unitName ? `<li><strong>Espacio:</strong> ${unitName}</li>` : '',
+    unitName ? `<li><strong>Espacio asignado:</strong> ${unitName}</li>` : '',
     fieldType ? `<li><strong>Modalidad:</strong> ${fieldType}</li>` : '',
     formattedDate ? `<li><strong>Fecha:</strong> ${formattedDate}</li>` : '',
     startTime && endTime ? `<li><strong>Horario:</strong> ${startTime} - ${endTime}</li>` : '',
+    `<li><strong>Pago reportado:</strong> Transferencia o depósito bancario</li>`,
   ].filter(Boolean).join('');
 
   return `
-    <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.6; max-width: 640px; margin: 0 auto; padding: 24px;">
-      <h2 style="margin-bottom: 16px;">Tu reserva fue enviada</h2>
-      <p>Hola${firstName ? ` ${firstName}` : ''},</p>
-      <p>Recibimos tu solicitud de reserva correctamente.</p>
-      <p>Tu reserva ha sido enviada para validación. Por favor, permítenos entre <strong>1 y 24 horas</strong> para confirmarla.</p>
-      ${bookingMeta ? `<ul style="padding-left: 20px; margin: 16px 0;">${bookingMeta}</ul>` : ''}
-      <p>Te notificaremos por este medio una vez quede confirmada o si necesitamos información adicional.</p>
-      <p>Gracias.</p>
+    <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.7; max-width: 640px; margin: 0 auto; padding: 24px; background: #f8fafc;">
+      <div style="background: #ffffff; border: 1px solid #e5e7eb; border-radius: 18px; padding: 32px;">
+        <p style="margin: 0 0 8px; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: #64748b;">Field Play</p>
+        <h2 style="margin-bottom: 16px; font-size: 28px; line-height: 1.2; color: #0f172a;">Recibimos tu reserva</h2>
+        <p>Hola${firstName ? ` ${firstName}` : ''},</p>
+        <p>Tu solicitud de reserva y tu comprobante de pago fueron recibidos correctamente.</p>
+        <p>Ahora nuestro equipo administrativo validará la información para confirmar la cancha y el horario seleccionados.</p>
+        ${bookingMeta ? `<ul style="padding-left: 20px; margin: 16px 0; color: #334155;">${bookingMeta}</ul>` : ''}
+        <div style="margin: 24px 0; padding: 16px; border-radius: 14px; background: #eff6ff; border: 1px solid #bfdbfe; color: #1e3a8a;">
+          <strong>Próximo paso:</strong> te notificaremos por este medio tan pronto la reserva quede <strong>confirmada</strong> o si necesitamos información adicional.
+        </div>
+        <p>Gracias por elegir Field Play.</p>
+        <p style="margin-top: 24px;">Saludos,<br /><strong>Equipo Field Play</strong></p>
+      </div>
     </div>
   `;
 };
@@ -82,7 +90,7 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         from: fromEmail,
         to: [body.email],
-        subject: 'Tu reserva fue recibida',
+        subject: 'Recibimos tu solicitud de reserva',
         html: htmlTemplate(body),
       }),
     });

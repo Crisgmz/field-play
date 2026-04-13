@@ -41,6 +41,7 @@ export interface Club {
 
 export type FieldType = 'F11' | 'F7' | 'F5';
 export type PhysicalSlotId = 'S1' | 'S2' | 'S3' | 'S4' | 'S5' | 'S6';
+export type PaymentMethod = 'bank_transfer';
 
 export interface PricingRule {
   id: string;
@@ -86,6 +87,9 @@ export interface Booking {
   status: BookingStatus;
   field_type: FieldType;
   total_price: number;
+  payment_method?: PaymentMethod;
+  payment_proof_path?: string | null;
+  admin_seen_at?: string | null;
   notes?: string;
   created_at?: string;
 }

@@ -1,6 +1,12 @@
 import { supabase } from '@/lib/supabase';
 
-interface BookingConfirmationEmailPayload {
+type RegistrationEmailPayload = {
+  email: string;
+  firstName: string;
+  lastName?: string;
+};
+
+interface BookingReceivedEmailPayload {
   email: string;
   firstName: string;
   clubName?: string;
@@ -10,6 +16,7 @@ interface BookingConfirmationEmailPayload {
   date: string;
   startTime: string;
   endTime: string;
+  paymentMethod?: string;
 }
 
 const formatDate = (value: string) => {
@@ -22,7 +29,17 @@ const formatDate = (value: string) => {
   }).format(date);
 };
 
-export async function sendBookingReceivedEmail(payload: BookingConfirmationEmailPayload) {
+export async function sendRegistrationWelcomeEmail(payload: RegistrationEmailPayload) {
+  const { error } = await supabase.functions.invoke('send-welcome-email', {
+    body: payload,
+  });
+
+  if (error) {
+    throw error;
+  }
+}
+
+export async function sendBookingReceivedEmail(payload: BookingReceivedEmailPayload) {
   const { error } = await supabase.functions.invoke('send-booking-received-email', {
     body: {
       ...payload,

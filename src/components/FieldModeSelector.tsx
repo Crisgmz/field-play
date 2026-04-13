@@ -8,7 +8,7 @@ interface Props {
 
 const modes = [
   { type: 'F5' as FieldType, label: 'Fútbol 5', players: '1 slot', desc: 'Elige 1 espacio físico', colorClass: 'field-badge-5' },
-  { type: 'F7' as FieldType, label: 'Fútbol 7', players: '2 slots', desc: 'Solo pares válidos', colorClass: 'field-badge-7' },
+  { type: 'F7' as FieldType, label: 'Fútbol 7', players: '2 slots', desc: 'Solo columnas válidas', colorClass: 'field-badge-7' },
   { type: 'F11' as FieldType, label: 'Fútbol 11', players: '6 slots', desc: 'Usa toda la cancha', colorClass: 'field-badge-11' },
 ];
 
