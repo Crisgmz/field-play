@@ -35,6 +35,7 @@ import { timeOverlaps } from '@/lib/availability';
 import CourtLayoutPreview from '@/components/CourtLayoutPreview';
 import FieldConfigPanel from '@/components/FieldConfigPanel';
 import VenueScheduleEditor from '@/components/VenueScheduleEditor';
+import ClosedDatesEditor from '@/components/ClosedDatesEditor';
 import { Settings } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
@@ -66,7 +67,9 @@ export default function AdminDashboard() {
     pricingRules,
     createBlock,
     deleteBlock,
-    updateBookingStatus,
+    confirmBooking,
+    rejectBooking,
+    cancelBooking,
     markBookingSeen,
     createClub,
     updateClub,
@@ -92,6 +95,9 @@ export default function AdminDashboard() {
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
   const [selectedBookingProofUrl, setSelectedBookingProofUrl] = useState<string | null>(null);
   const [loadingBookingProofUrl, setLoadingBookingProofUrl] = useState(false);
+  const [bookingActionMode, setBookingActionMode] = useState<'idle' | 'reject' | 'cancel-confirmed'>('idle');
+  const [bookingActionReason, setBookingActionReason] = useState('');
+  const [bookingActionBusy, setBookingActionBusy] = useState(false);
 
   // Edit states
   const [editingClubId, setEditingClubId] = useState<string | null>(null);
@@ -224,18 +230,59 @@ export default function AdminDashboard() {
   const openBookingDetails = async (bookingId: string) => {
     const booking = bookings.find((item) => item.id === bookingId) ?? null;
     setSelectedBookingId(bookingId);
+    setBookingActionMode('idle');
+    setBookingActionReason('');
     if (booking && !booking.admin_seen_at) {
       await markBookingSeen(bookingId);
     }
   };
 
-  const handleCancelFromDetails = async (bookingId: string) => {
-    const confirmed = window.confirm('Esta acción cancelará la reserva confirmada. ¿Deseas continuar?');
-    if (!confirmed) return;
-
-    await updateBookingStatus(bookingId, 'cancelled');
+  const closeBookingDetails = () => {
     setSelectedBookingId(null);
-    toast.success('Reserva cancelada correctamente.');
+    setSelectedBookingProofUrl(null);
+    setBookingActionMode('idle');
+    setBookingActionReason('');
+    setBookingActionBusy(false);
+  };
+
+  const handleConfirmBooking = async (bookingId: string) => {
+    setBookingActionBusy(true);
+    const ok = await confirmBooking(bookingId);
+    setBookingActionBusy(false);
+    if (ok) {
+      toast.success('Reserva confirmada. Notificamos al cliente.');
+      closeBookingDetails();
+    } else {
+      toast.error('No se pudo confirmar la reserva.');
+    }
+  };
+
+  const handleSubmitRejection = async (bookingId: string) => {
+    if (!bookingActionReason.trim()) {
+      toast.error('Escribe un motivo para que el cliente lo reciba por correo.');
+      return;
+    }
+    setBookingActionBusy(true);
+    const ok = await rejectBooking(bookingId, bookingActionReason);
+    setBookingActionBusy(false);
+    if (ok) {
+      toast.success('Comprobante rechazado. Notificamos al cliente.');
+      closeBookingDetails();
+    } else {
+      toast.error('No se pudo registrar el rechazo.');
+    }
+  };
+
+  const handleSubmitCancelConfirmed = async (bookingId: string) => {
+    setBookingActionBusy(true);
+    const ok = await cancelBooking(bookingId, bookingActionReason);
+    setBookingActionBusy(false);
+    if (ok) {
+      toast.success('Reserva cancelada. Notificamos al cliente.');
+      closeBookingDetails();
+    } else {
+      toast.error('No se pudo cancelar la reserva.');
+    }
   };
 
   const handleCreateBlock = async () => {
@@ -649,8 +696,7 @@ export default function AdminDashboard() {
             )}
             <Dialog open={Boolean(selectedBookingId)} onOpenChange={(open) => {
               if (!open) {
-                setSelectedBookingId(null);
-                setSelectedBookingProofUrl(null);
+                closeBookingDetails();
               }
             }}>
               <DialogContent>
@@ -694,32 +740,98 @@ export default function AdminDashboard() {
                       {loadingBookingProofUrl ? (
                         <p className="text-sm text-muted-foreground">Cargando comprobante...</p>
                       ) : selectedBookingProofUrl ? (
-                        <a href={selectedBookingProofUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-sm font-medium text-primary hover:underline">
-                          <ExternalLink className="h-4 w-4" /> Ver comprobante adjunto
-                        </a>
+                        <div className="space-y-2">
+                          {selectedBooking.payment_proof_path?.toLowerCase().endsWith('.pdf') ? (
+                            <iframe src={selectedBookingProofUrl} title="Comprobante de pago" className="h-72 w-full rounded-lg border border-border bg-muted" />
+                          ) : (
+                            <img src={selectedBookingProofUrl} alt="Comprobante de pago" className="max-h-72 w-full rounded-lg border border-border object-contain bg-muted" />
+                          )}
+                          <a href={selectedBookingProofUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-xs font-medium text-primary hover:underline">
+                            <ExternalLink className="h-3.5 w-3.5" /> Abrir en nueva pestaña
+                          </a>
+                          {selectedBooking.proof_replaced_at && (
+                            <p className="text-[11px] text-amber-700">El cliente reemplazó el comprobante el {new Date(selectedBooking.proof_replaced_at).toLocaleString('es-DO')}.</p>
+                          )}
+                        </div>
                       ) : (
                         <p className="text-sm text-muted-foreground">No hay comprobante adjunto.</p>
                       )}
                     </div>
 
+                    {selectedBooking.rejection_reason && selectedBooking.status === 'cancelled' && (
+                      <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+                        <p className="font-semibold">Motivo del rechazo</p>
+                        <p className="mt-1">{selectedBooking.rejection_reason}</p>
+                      </div>
+                    )}
+                    {selectedBooking.cancellation_reason && selectedBooking.status === 'cancelled' && !selectedBooking.rejection_reason && (
+                      <div className="rounded-xl border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
+                        <p className="font-semibold text-foreground">Motivo de cancelación</p>
+                        <p className="mt-1">{selectedBooking.cancellation_reason}</p>
+                      </div>
+                    )}
+
                     <div className="flex flex-col gap-2 pt-2">
-                      {selectedBooking.status === 'pending' && (
+                      {selectedBooking.status === 'pending' && bookingActionMode === 'idle' && (
                         <>
-                          <Button className="w-full bg-emerald-600 text-white hover:bg-emerald-700" onClick={() => { void updateBookingStatus(selectedBooking.id, 'confirmed'); setSelectedBookingId(null); toast.success('Reserva confirmada.'); }}>
-                            Confirmar reserva
+                          <Button className="w-full bg-emerald-600 text-white hover:bg-emerald-700" onClick={() => void handleConfirmBooking(selectedBooking.id)} disabled={bookingActionBusy}>
+                            {bookingActionBusy ? 'Procesando...' : 'Confirmar pago y reserva'}
                           </Button>
-                          <Button className="w-full bg-destructive text-destructive-foreground hover:opacity-90" onClick={() => { void updateBookingStatus(selectedBooking.id, 'cancelled'); setSelectedBookingId(null); toast.success('Reserva cancelada.'); }}>
-                            Cancelar reserva
+                          <Button className="w-full bg-destructive text-destructive-foreground hover:opacity-90" onClick={() => { setBookingActionMode('reject'); setBookingActionReason(''); }}>
+                            Rechazar comprobante
                           </Button>
                         </>
                       )}
-                      {selectedBooking.status === 'confirmed' && (
+
+                      {selectedBooking.status === 'pending' && bookingActionMode === 'reject' && (
+                        <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 space-y-2">
+                          <p className="text-xs font-semibold text-destructive">Motivo del rechazo (lo verá el cliente por correo)</p>
+                          <textarea
+                            value={bookingActionReason}
+                            onChange={(e) => setBookingActionReason(e.target.value)}
+                            rows={3}
+                            placeholder="Ej: el comprobante no coincide con el monto o no se ve la transacción."
+                            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-destructive"
+                          />
+                          <div className="flex gap-2">
+                            <Button variant="outline" className="flex-1" onClick={() => { setBookingActionMode('idle'); setBookingActionReason(''); }} disabled={bookingActionBusy}>
+                              Volver
+                            </Button>
+                            <Button className="flex-1 bg-destructive text-destructive-foreground hover:opacity-90" onClick={() => void handleSubmitRejection(selectedBooking.id)} disabled={bookingActionBusy}>
+                              {bookingActionBusy ? 'Enviando...' : 'Rechazar y notificar'}
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+
+                      {selectedBooking.status === 'confirmed' && bookingActionMode === 'idle' && (
                         <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3">
                           <p className="text-xs text-muted-foreground">Acción restringida</p>
-                          <p className="mt-1 text-sm text-foreground">Las reservas confirmadas solo pueden cambiarse desde este detalle y mediante una cancelación explícita.</p>
-                          <Button className="mt-3 w-full bg-destructive text-destructive-foreground hover:opacity-90" onClick={() => void handleCancelFromDetails(selectedBooking.id)}>
+                          <p className="mt-1 text-sm text-foreground">Las reservas confirmadas solo pueden cancelarse explícitamente. Se notificará al cliente.</p>
+                          <Button className="mt-3 w-full bg-destructive text-destructive-foreground hover:opacity-90" onClick={() => { setBookingActionMode('cancel-confirmed'); setBookingActionReason(''); }}>
                             Cancelar reserva confirmada
                           </Button>
+                        </div>
+                      )}
+
+                      {selectedBooking.status === 'confirmed' && bookingActionMode === 'cancel-confirmed' && (
+                        <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 space-y-2">
+                          <p className="text-xs font-semibold text-destructive">Motivo de la cancelación (opcional, se enviará al cliente)</p>
+                          <textarea
+                            value={bookingActionReason}
+                            onChange={(e) => setBookingActionReason(e.target.value)}
+                            rows={3}
+                            placeholder="Ej: cierre por mantenimiento de emergencia."
+                            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-destructive"
+                          />
+                          <div className="flex gap-2">
+                            <Button variant="outline" className="flex-1" onClick={() => { setBookingActionMode('idle'); setBookingActionReason(''); }} disabled={bookingActionBusy}>
+                              Volver
+                            </Button>
+                            <Button className="flex-1 bg-destructive text-destructive-foreground hover:opacity-90" onClick={() => void handleSubmitCancelConfirmed(selectedBooking.id)} disabled={bookingActionBusy}>
+                              {bookingActionBusy ? 'Cancelando...' : 'Cancelar y notificar'}
+                            </Button>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -762,12 +874,9 @@ export default function AdminDashboard() {
 
                     <div className="mt-4 flex flex-col gap-2 sm:flex-row">
                       {!isConfirmed && booking.status !== 'cancelled' && (
-                        <>
-                          <Button className="w-full bg-emerald-600 text-white hover:bg-emerald-700" size="sm" onClick={() => void updateBookingStatus(booking.id, 'confirmed')}>Confirmar</Button>
-                          <Button className="w-full bg-destructive text-destructive-foreground hover:opacity-90" size="sm" onClick={() => void updateBookingStatus(booking.id, 'cancelled')}>Cancelar</Button>
-                        </>
+                        <Button className="w-full bg-emerald-600 text-white hover:bg-emerald-700" size="sm" onClick={() => void handleConfirmBooking(booking.id)}>Confirmar</Button>
                       )}
-                      <Button className="w-full" size="sm" variant="outline" onClick={() => void openBookingDetails(booking.id)}>Ver reserva</Button>
+                      <Button className="w-full" size="sm" variant="outline" onClick={() => void openBookingDetails(booking.id)}>Ver y validar</Button>
                     </div>
                   </div>
                 );
@@ -813,12 +922,9 @@ export default function AdminDashboard() {
                           <td className="px-4 py-3">
                             <div className="flex gap-2">
                               {!isConfirmed && booking.status !== 'cancelled' && (
-                                <>
-                                  <Button size="sm" className="bg-emerald-600 text-white hover:bg-emerald-700" onClick={() => void updateBookingStatus(booking.id, 'confirmed')}>Confirmar</Button>
-                                  <Button size="sm" className="bg-destructive text-destructive-foreground hover:opacity-90" onClick={() => void updateBookingStatus(booking.id, 'cancelled')}>Cancelar</Button>
-                                </>
+                                <Button size="sm" className="bg-emerald-600 text-white hover:bg-emerald-700" onClick={() => void handleConfirmBooking(booking.id)}>Confirmar</Button>
                               )}
-                              <Button size="sm" variant="outline" onClick={() => void openBookingDetails(booking.id)}>Ver reserva</Button>
+                              <Button size="sm" variant="outline" onClick={() => void openBookingDetails(booking.id)}>Ver y validar</Button>
                             </div>
                           </td>
                         </tr>
@@ -1320,6 +1426,18 @@ export default function AdminDashboard() {
                           <SelectItem value="60">60 minutos</SelectItem>
                         </SelectContent>
                       </Select>
+                    </div>
+
+                    <div className="mt-6 border-t border-border pt-4">
+                      <ClosedDatesEditor
+                        closedDates={venueConfig.closedDates ?? []}
+                        onChange={(dates) => {
+                          void updateVenueConfig({ ...venueConfig, closedDates: dates }).then((ok) => {
+                            if (ok) toast.success('Días cerrados actualizados.');
+                            else toast.error('No se pudo guardar.');
+                          });
+                        }}
+                      />
                     </div>
                   </div>
 

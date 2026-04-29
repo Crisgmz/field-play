@@ -21,6 +21,8 @@ const BANK_ACCOUNT = {
 
 const ACCEPTED_PROOF_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
 const MAX_PROOF_SIZE_BYTES = 10 * 1024 * 1024;
+const BOOKING_MAX_ADVANCE_DAYS = 60;
+const CANCELLATION_POLICY_HOURS = 24;
 
 export default function BookingFlow() {
   const { clubId } = useParams();
@@ -314,25 +316,38 @@ export default function BookingFlow() {
       {step === 2 && (
         <div>
           <h2 className="mb-1 font-heading text-xl font-bold text-foreground">Elegir fecha</h2>
-          <p className="mb-6 text-sm text-muted-foreground">Selecciona el día en que deseas jugar.</p>
-          <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap">
-            {Array.from({ length: 7 }, (_, i) => {
+          <p className="mb-4 text-sm text-muted-foreground">Selecciona el día en que deseas jugar. Puedes reservar hasta 60 días en el futuro.</p>
+          <div className="flex gap-2 overflow-x-auto pb-2 snap-x snap-mandatory">
+            {Array.from({ length: BOOKING_MAX_ADVANCE_DAYS }, (_, i) => {
               const date = new Date();
               date.setDate(date.getDate() + i);
               const dateStr = date.toISOString().split('T')[0];
               const dayName = date.toLocaleDateString('es', { weekday: 'short' });
               const dayNum = date.getDate();
+              const monthName = date.toLocaleDateString('es', { month: 'short' });
               const isSelected = selectedDate === dateStr;
+              const dayOfWeek = date.getDay();
+              const daySchedule = venueConfig?.weekSchedule?.find((d) => d.day === dayOfWeek);
+              const isDayClosed = daySchedule?.closed === true;
+              const isHoliday = (venueConfig?.closedDates ?? []).includes(dateStr);
+              const isClosed = isDayClosed || isHoliday;
               return (
                 <button
                   key={dateStr}
+                  disabled={isClosed}
                   onClick={() => { setSelectedDate(dateStr); setSelectedHours([]); setSelectedUnitId(null); setPaymentProofFile(null); }}
-                  className={`flex min-w-[88px] flex-col items-center rounded-xl border px-3 py-3 transition-all ${
-                    isSelected ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-card text-card-foreground hover:border-primary/50'
+                  className={`snap-start flex min-w-[88px] flex-shrink-0 flex-col items-center rounded-xl border px-3 py-3 transition-all ${
+                    isClosed
+                      ? 'cursor-not-allowed border-border bg-muted text-muted-foreground opacity-50'
+                      : isSelected
+                        ? 'border-primary bg-primary text-primary-foreground'
+                        : 'border-border bg-card text-card-foreground hover:border-primary/50'
                   }`}
+                  title={isHoliday ? 'Día cerrado' : isDayClosed ? 'No abre este día' : undefined}
                 >
                   <span className="text-[10px] font-medium uppercase opacity-70">{dayName}</span>
                   <span className="font-heading text-lg font-bold">{dayNum}</span>
+                  <span className="text-[9px] uppercase opacity-60">{monthName}</span>
                 </button>
               );
             })}
@@ -426,6 +441,9 @@ export default function BookingFlow() {
                   <p><strong>Total:</strong> RD$ {totalPrice.toLocaleString()}</p>
                 </div>
                 <p className="mt-4 text-sm opacity-90">La reserva quedará en estado <strong>pendiente de validación</strong> hasta que el equipo administrativo confirme el pago.</p>
+                <p className="mt-3 text-xs opacity-80">
+                  <strong>Política de cancelación:</strong> con más de {CANCELLATION_POLICY_HOURS}h de anticipación calificas para reembolso. Cancelaciones con menos de {CANCELLATION_POLICY_HOURS}h o no-shows no son reembolsables.
+                </p>
               </div>
             </div>
           )}

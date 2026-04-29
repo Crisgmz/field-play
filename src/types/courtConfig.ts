@@ -102,6 +102,7 @@ export interface VenueConfig {
   clubId: string;
   weekSchedule: DaySchedule[];
   slotDurationMinutes: 30 | 60; // granularity of booking time slots
+  closedDates?: string[]; // YYYY-MM-DD overrides on top of the weekly schedule
 }
 
 // ── CONFLICT DETECTION ─────────────────────────────────────

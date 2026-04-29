@@ -4,11 +4,19 @@ import { LoginInput, RegisterInput, User } from '@/types';
 import { supabase } from '@/lib/supabase';
 import { sendRegistrationWelcomeEmail } from '@/lib/bookingEmail';
 
+interface UpdateProfileInput {
+  first_name?: string;
+  last_name?: string;
+  phone?: string;
+  national_id?: string | null;
+}
+
 interface AuthContextType {
   user: User | null;
   login: (payload: LoginInput) => Promise<{ ok: boolean; isAdmin: boolean; message?: string }>;
   register: (payload: RegisterInput) => Promise<{ ok: boolean; user?: User; message?: string }>;
   logout: () => Promise<void>;
+  updateProfile: (payload: UpdateProfileInput) => Promise<{ ok: boolean; message?: string }>;
   isAdmin: boolean;
   loading: boolean;
   refreshProfile: () => Promise<User | null>;
@@ -19,6 +27,7 @@ const AuthContext = createContext<AuthContextType>({
   login: async () => ({ ok: false, isAdmin: false }),
   register: async () => ({ ok: false }),
   logout: async () => {},
+  updateProfile: async () => ({ ok: false }),
   isAdmin: false,
   loading: true,
   refreshProfile: async () => null,
@@ -167,8 +176,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(null);
   };
 
+  const updateProfile = async (payload: UpdateProfileInput) => {
+    if (!user) {
+      return { ok: false, message: 'No hay sesión activa.' };
+    }
+
+    const updates: Record<string, unknown> = {};
+    if (payload.first_name !== undefined) updates.first_name = payload.first_name.trim();
+    if (payload.last_name !== undefined) updates.last_name = payload.last_name.trim();
+    if (payload.phone !== undefined) updates.phone = payload.phone.trim();
+    if (payload.national_id !== undefined) {
+      updates.national_id = payload.national_id ? payload.national_id.trim() : null;
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return { ok: true };
+    }
+
+    const { error } = await supabase.from('profiles').update(updates).eq('id', user.id);
+    if (error) {
+      return { ok: false, message: error.message };
+    }
+
+    await refreshProfile();
+    return { ok: true };
+  };
+
   const value = useMemo(
-    () => ({ user, login, register, logout, isAdmin: user?.role === 'club_admin', loading, refreshProfile }),
+    () => ({ user, login, register, logout, updateProfile, isAdmin: user?.role === 'club_admin', loading, refreshProfile }),
     [user, loading],
   );
 

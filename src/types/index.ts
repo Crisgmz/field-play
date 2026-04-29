@@ -92,6 +92,13 @@ export interface Booking {
   admin_seen_at?: string | null;
   notes?: string;
   created_at?: string;
+  cancellation_reason?: string | null;
+  cancelled_by?: string | null;
+  cancelled_at?: string | null;
+  rejection_reason?: string | null;
+  rejected_at?: string | null;
+  confirmed_at?: string | null;
+  proof_replaced_at?: string | null;
 }
 
 export type BlockType = 'practice' | 'maintenance' | 'event';

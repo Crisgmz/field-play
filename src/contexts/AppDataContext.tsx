@@ -1,12 +1,20 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { PHYSICAL_SLOTS } from '@/data/mockData';
 import { supabase } from '@/lib/supabase';
-import { sendBookingReceivedEmail } from '@/lib/bookingEmail';
+import {
+  sendAdminBookingAlert,
+  sendBookingCancelledEmail,
+  sendBookingConfirmedEmail,
+  sendBookingReceivedEmail,
+} from '@/lib/bookingEmail';
 import { useAuth } from '@/contexts/AuthContext';
 import { Block, BlockType, Booking, BookingStatus, Club, Field, FieldType, FieldUnit, PaymentMethod, PhysicalSlotId, PricingRule, User } from '@/types';
 import { VenueConfig } from '@/types/courtConfig';
 import type { Database } from '@/lib/supabase-types';
 import { createDefaultVenueConfig } from '@/lib/courtConfig';
+
+const CANCELLATION_POLICY_HOURS = 24;
+const PROOF_BUCKET = 'booking-proofs';
 
 interface CreateBookingInput {
   user_id: string;
@@ -77,6 +85,12 @@ interface UpdatePricingRuleInput {
   is_active?: boolean;
 }
 
+interface CancellationCheck {
+  allowed: boolean;
+  refundEligible: boolean;
+  hoursUntilStart: number;
+}
+
 interface AppDataContextType {
   clubs: Club[];
   fields: Field[];
@@ -86,8 +100,12 @@ interface AppDataContextType {
   profiles: User[];
   venueConfigs: VenueConfig[];
   createBooking: (payload: CreateBookingInput) => Promise<Booking | null>;
-  cancelBooking: (bookingId: string) => Promise<void>;
+  cancelBooking: (bookingId: string, reason?: string) => Promise<boolean>;
   updateBookingStatus: (bookingId: string, status: BookingStatus) => Promise<void>;
+  confirmBooking: (bookingId: string) => Promise<boolean>;
+  rejectBooking: (bookingId: string, reason: string) => Promise<boolean>;
+  replacePaymentProof: (bookingId: string, file: File) => Promise<boolean>;
+  evaluateCancellation: (bookingId: string) => CancellationCheck | null;
   markBookingSeen: (bookingId: string) => Promise<void>;
   createBlock: (payload: CreateBlockInput) => Promise<Block | null>;
   deleteBlock: (blockId: string) => Promise<void>;
@@ -281,13 +299,24 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       admin_seen_at: item.admin_seen_at,
       notes: item.notes ?? undefined,
       created_at: item.created_at,
+      cancellation_reason: (item as { cancellation_reason?: string | null }).cancellation_reason ?? null,
+      cancelled_by: (item as { cancelled_by?: string | null }).cancelled_by ?? null,
+      cancelled_at: (item as { cancelled_at?: string | null }).cancelled_at ?? null,
+      rejection_reason: (item as { rejection_reason?: string | null }).rejection_reason ?? null,
+      rejected_at: (item as { rejected_at?: string | null }).rejected_at ?? null,
+      confirmed_at: (item as { confirmed_at?: string | null }).confirmed_at ?? null,
+      proof_replaced_at: (item as { proof_replaced_at?: string | null }).proof_replaced_at ?? null,
     }));
 
-    const venueConfigsData: VenueConfig[] = (venueConfigsRes.data ?? []).map((item) => ({
-      clubId: item.club_id,
-      weekSchedule: item.week_schedule as VenueConfig['weekSchedule'],
-      slotDurationMinutes: item.slot_duration_minutes as VenueConfig['slotDurationMinutes'],
-    }));
+    const venueConfigsData: VenueConfig[] = (venueConfigsRes.data ?? []).map((item) => {
+      const closedDates = (item as { closed_dates?: string[] | null }).closed_dates ?? [];
+      return {
+        clubId: item.club_id,
+        weekSchedule: item.week_schedule as VenueConfig['weekSchedule'],
+        slotDurationMinutes: item.slot_duration_minutes as VenueConfig['slotDurationMinutes'],
+        closedDates: Array.isArray(closedDates) ? closedDates : [],
+      };
+    });
 
     setProfiles(profilesData);
     setClubs(clubsData);
@@ -386,6 +415,40 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
     }
 
+    // Notify the club owner so they validate the proof.
+    const owner = club ? profiles.find((profile) => profile.id === club.owner_id) : null;
+    if (owner?.email) {
+      try {
+        let proofUrl: string | null = null;
+        if (data.payment_proof_path) {
+          const { data: signed } = await supabase.storage
+            .from(PROOF_BUCKET)
+            .createSignedUrl(data.payment_proof_path, 60 * 60 * 24);
+          proofUrl = signed?.signedUrl ?? null;
+        }
+
+        await sendAdminBookingAlert({
+          adminEmail: owner.email,
+          adminName: owner.first_name,
+          clientName: user ? `${user.first_name} ${user.last_name}`.trim() : undefined,
+          clientEmail: user?.email,
+          clientPhone: user?.phone,
+          clubName: club?.name,
+          fieldName: field?.name,
+          unitName: unit?.name,
+          fieldType: data.field_type,
+          date: data.date,
+          startTime: data.start_time,
+          endTime: data.end_time,
+          totalPrice: Number(data.total_price ?? 0),
+          proofUrl: proofUrl ?? undefined,
+          panelUrl: typeof window !== 'undefined' ? `${window.location.origin}/admin/bookings` : undefined,
+        });
+      } catch (alertError) {
+        console.error('Could not send admin booking alert', alertError);
+      }
+    }
+
     await reload();
     return {
       id: data.id,
@@ -406,16 +469,224 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     };
   };
 
-  const cancelBooking = async (bookingId: string) => {
-    const { error } = await supabase.from('bookings').update({ status: 'cancelled' }).eq('id', bookingId);
+  const findBookingContext = (bookingId: string) => {
+    const booking = bookings.find((item) => item.id === bookingId);
+    if (!booking) return null;
+    const owner = profiles.find((profile) => profile.id === booking.user_id) ?? null;
+    const field = fields.find((item) => item.units.some((unit) => unit.id === booking.field_unit_id)) ?? null;
+    const unit = field?.units.find((item) => item.id === booking.field_unit_id) ?? null;
+    const club = clubs.find((item) => item.id === booking.club_id) ?? null;
+    return { booking, owner, field, unit, club };
+  };
+
+  const evaluateCancellation = (bookingId: string): CancellationCheck | null => {
+    const booking = bookings.find((item) => item.id === bookingId);
+    if (!booking) return null;
+    const start = new Date(`${booking.date}T${booking.start_time}:00`);
+    const hoursUntilStart = (start.getTime() - Date.now()) / (1000 * 60 * 60);
+    return {
+      allowed: booking.status !== 'cancelled' && hoursUntilStart > 0,
+      refundEligible: hoursUntilStart >= CANCELLATION_POLICY_HOURS,
+      hoursUntilStart,
+    };
+  };
+
+  const cancelBooking = async (bookingId: string, reason?: string): Promise<boolean> => {
+    const ctx = findBookingContext(bookingId);
+    if (!ctx) return false;
+
+    const { error } = await supabase.rpc('rpc_cancel_booking', {
+      p_booking_id: bookingId,
+      p_reason: reason ?? null,
+    });
+
     if (error) {
-      console.error('Error cancelling booking:', error);
-      return;
+      // Fallback for environments where migration 004 hasn't been deployed yet.
+      const { error: fallbackError } = await supabase
+        .from('bookings')
+        .update({ status: 'cancelled' })
+        .eq('id', bookingId);
+      if (fallbackError) {
+        console.error('Error cancelling booking:', fallbackError);
+        return false;
+      }
     }
+
+    if (ctx.owner?.email) {
+      const cancelledBy = user?.id === ctx.booking.user_id ? 'client' : 'admin';
+      try {
+        await sendBookingCancelledEmail({
+          email: ctx.owner.email,
+          firstName: ctx.owner.first_name,
+          clubName: ctx.club?.name,
+          fieldName: ctx.field?.name,
+          unitName: ctx.unit?.name,
+          fieldType: ctx.booking.field_type,
+          date: ctx.booking.date,
+          startTime: ctx.booking.start_time,
+          endTime: ctx.booking.end_time,
+          totalPrice: ctx.booking.total_price,
+          reason: reason ?? null,
+          cancelledBy,
+          isRejection: false,
+        });
+      } catch (emailError) {
+        console.error('Could not send cancellation email', emailError);
+      }
+    }
+
     await reload();
+    return true;
+  };
+
+  const sendConfirmationEmail = async (bookingId: string) => {
+    const ctx = findBookingContext(bookingId);
+    if (!ctx?.owner?.email) return;
+    try {
+      await sendBookingConfirmedEmail({
+        email: ctx.owner.email,
+        firstName: ctx.owner.first_name,
+        clubName: ctx.club?.name,
+        clubLocation: ctx.club?.location,
+        fieldName: ctx.field?.name,
+        unitName: ctx.unit?.name,
+        fieldType: ctx.booking.field_type,
+        date: ctx.booking.date,
+        startTime: ctx.booking.start_time,
+        endTime: ctx.booking.end_time,
+        totalPrice: ctx.booking.total_price,
+        policyHours: CANCELLATION_POLICY_HOURS,
+      });
+    } catch (emailError) {
+      console.error('Could not send confirmation email', emailError);
+    }
+  };
+
+  const confirmBooking = async (bookingId: string): Promise<boolean> => {
+    const { error } = await supabase.rpc('rpc_confirm_booking', { p_booking_id: bookingId });
+    if (error) {
+      const { error: fallbackError } = await supabase
+        .from('bookings')
+        .update({ status: 'confirmed' })
+        .eq('id', bookingId);
+      if (fallbackError) {
+        console.error('Error confirming booking:', fallbackError);
+        return false;
+      }
+    }
+    await sendConfirmationEmail(bookingId);
+    await reload();
+    return true;
+  };
+
+  const rejectBooking = async (bookingId: string, reason: string): Promise<boolean> => {
+    const trimmed = reason?.trim();
+    if (!trimmed) {
+      console.error('Rejection reason is required');
+      return false;
+    }
+
+    const ctx = findBookingContext(bookingId);
+    if (!ctx) return false;
+
+    const { error } = await supabase.rpc('rpc_reject_booking', {
+      p_booking_id: bookingId,
+      p_reason: trimmed,
+    });
+
+    if (error) {
+      console.error('Error rejecting booking:', error);
+      return false;
+    }
+
+    if (ctx.owner?.email) {
+      try {
+        await sendBookingCancelledEmail({
+          email: ctx.owner.email,
+          firstName: ctx.owner.first_name,
+          clubName: ctx.club?.name,
+          fieldName: ctx.field?.name,
+          unitName: ctx.unit?.name,
+          fieldType: ctx.booking.field_type,
+          date: ctx.booking.date,
+          startTime: ctx.booking.start_time,
+          endTime: ctx.booking.end_time,
+          totalPrice: ctx.booking.total_price,
+          reason: trimmed,
+          cancelledBy: 'admin',
+          isRejection: true,
+        });
+      } catch (emailError) {
+        console.error('Could not send rejection email', emailError);
+      }
+    }
+
+    await reload();
+    return true;
+  };
+
+  const replacePaymentProof = async (bookingId: string, file: File): Promise<boolean> => {
+    if (!user) return false;
+    const booking = bookings.find((item) => item.id === bookingId);
+    if (!booking) return false;
+    if (booking.user_id !== user.id) {
+      console.error('Cannot replace proof for another user\'s booking');
+      return false;
+    }
+    if (booking.status !== 'pending') {
+      console.error('Proof can only be replaced while booking is pending');
+      return false;
+    }
+
+    const ext = file.name.split('.').pop()?.toLowerCase() ?? 'bin';
+    const safeDate = booking.date.replace(/-/g, '');
+    const filePath = `${user.id}/${safeDate}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from(PROOF_BUCKET)
+      .upload(filePath, file, { upsert: false, contentType: file.type });
+
+    if (uploadError) {
+      console.error('Error uploading replacement proof:', uploadError);
+      return false;
+    }
+
+    const oldPath = booking.payment_proof_path;
+    const { error: rpcError } = await supabase.rpc('rpc_replace_payment_proof', {
+      p_booking_id: bookingId,
+      p_new_path: filePath,
+    });
+
+    if (rpcError) {
+      // Fallback if migration 004 isn't applied yet.
+      const { error: fallbackError } = await supabase
+        .from('bookings')
+        .update({ payment_proof_path: filePath, admin_seen_at: null })
+        .eq('id', bookingId);
+      if (fallbackError) {
+        console.error('Error replacing payment proof:', fallbackError);
+        await supabase.storage.from(PROOF_BUCKET).remove([filePath]);
+        return false;
+      }
+    }
+
+    if (oldPath) {
+      await supabase.storage.from(PROOF_BUCKET).remove([oldPath]);
+    }
+
+    await reload();
+    return true;
   };
 
   const updateBookingStatus = async (bookingId: string, status: BookingStatus) => {
+    if (status === 'confirmed') {
+      await confirmBooking(bookingId);
+      return;
+    }
+    if (status === 'cancelled') {
+      await cancelBooking(bookingId);
+      return;
+    }
     const { error } = await supabase.from('bookings').update({ status }).eq('id', bookingId);
     if (error) {
       console.error('Error updating booking status:', error);
@@ -678,21 +949,33 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const updateVenueConfig = async (config: VenueConfig): Promise<boolean> => {
-    const { error } = await supabase.from('venue_configs').upsert({
+    const closedDates = Array.isArray(config.closedDates) ? config.closedDates : [];
+    const payload: Record<string, unknown> = {
       club_id: config.clubId,
       week_schedule: config.weekSchedule,
       slot_duration_minutes: config.slotDurationMinutes,
-    }, { onConflict: 'club_id' });
+      closed_dates: closedDates,
+    };
+
+    let { error } = await supabase.from('venue_configs').upsert(payload, { onConflict: 'club_id' });
+
+    // If closed_dates column doesn't exist yet (migration 004 not applied), retry without it.
+    if (error && /closed_dates/.test(error.message ?? '')) {
+      delete payload.closed_dates;
+      const retry = await supabase.from('venue_configs').upsert(payload, { onConflict: 'club_id' });
+      error = retry.error;
+    }
 
     if (error) {
       console.error('Error updating venue config:', error);
       return false;
     }
 
+    const normalized: VenueConfig = { ...config, closedDates };
     setVenueConfigs((current) => (
       current.some((vc) => vc.clubId === config.clubId)
-        ? current.map((vc) => (vc.clubId === config.clubId ? config : vc))
-        : [...current, config]
+        ? current.map((vc) => (vc.clubId === config.clubId ? normalized : vc))
+        : [...current, normalized]
     ));
     return true;
   };
@@ -722,6 +1005,10 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     createBooking,
     cancelBooking,
     updateBookingStatus,
+    confirmBooking,
+    rejectBooking,
+    replacePaymentProof,
+    evaluateCancellation,
     markBookingSeen,
     createBlock,
     deleteBlock,

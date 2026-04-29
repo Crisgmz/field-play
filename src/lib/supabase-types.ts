@@ -117,6 +117,13 @@ export interface Database {
           notes: string | null;
           created_at: string;
           updated_at: string;
+          cancellation_reason: string | null;
+          cancelled_by: string | null;
+          cancelled_at: string | null;
+          rejection_reason: string | null;
+          rejected_at: string | null;
+          confirmed_at: string | null;
+          proof_replaced_at: string | null;
         };
       };
     };
