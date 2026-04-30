@@ -1,4 +1,4 @@
-export type UserRole = 'client' | 'club_admin';
+export type UserRole = 'client' | 'staff' | 'club_admin';
 
 export interface User {
   id: string;
@@ -8,6 +8,8 @@ export interface User {
   phone: string;
   national_id?: string | null;
   role: UserRole;
+  staff_club_id?: string | null;
+  is_active?: boolean;
 }
 
 export interface LoginInput {
@@ -37,6 +39,18 @@ export interface Club {
   open_time: string;
   close_time: string;
   is_active: boolean;
+  phone?: string | null;
+  email?: string | null;
+  amenities?: string[];
+}
+
+export interface ClubImage {
+  id: string;
+  club_id: string;
+  storage_path: string;
+  caption: string | null;
+  position: number;
+  created_at: string;
 }
 
 export type FieldType = 'F11' | 'F7' | 'F5';
@@ -112,6 +126,7 @@ export interface Block {
   end_time: string;
   type: BlockType;
   reason: string;
+  batch_id?: string | null;
 }
 
 export interface TimeSlot {

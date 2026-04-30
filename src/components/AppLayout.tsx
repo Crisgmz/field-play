@@ -15,6 +15,8 @@ import {
   DollarSign,
   ListChecks,
   Settings,
+  UsersRound,
+  BarChart3,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
@@ -25,24 +27,37 @@ const clientNav = [
   { label: 'Mi perfil', icon: User, path: '/profile' },
 ];
 
-const adminSections = [
+type AdminNavItem = {
+  label: string;
+  icon: typeof Home;
+  path: string;
+  /** Sections marked admin-only are hidden for staff accounts. */
+  adminOnly?: boolean;
+};
+
+const adminSections: AdminNavItem[] = [
   { label: 'Resumen', icon: LayoutDashboard, path: '/admin/overview' },
   { label: 'Calendario', icon: Calendar, path: '/admin/calendar' },
   { label: 'Reservas', icon: ListChecks, path: '/admin/bookings' },
   { label: 'Bloqueos', icon: Ban, path: '/admin/blocks' },
-  { label: 'Clubes', icon: Building2, path: '/admin/clubs' },
-  { label: 'Campos', icon: Map, path: '/admin/fields' },
-  { label: 'Configuración', icon: Settings, path: '/admin/config' },
-  { label: 'Precios', icon: DollarSign, path: '/admin/pricing' },
+  { label: 'Reportes', icon: BarChart3, path: '/admin/reports', adminOnly: true },
+  { label: 'Clubes', icon: Building2, path: '/admin/clubs', adminOnly: true },
+  { label: 'Campos', icon: Map, path: '/admin/fields', adminOnly: true },
+  { label: 'Configuración', icon: Settings, path: '/admin/config', adminOnly: true },
+  { label: 'Precios', icon: DollarSign, path: '/admin/pricing', adminOnly: true },
+  { label: 'Equipo', icon: UsersRound, path: '/admin/team', adminOnly: true },
 ];
 
 export default function AppLayout({ children }: { children: ReactNode }) {
-  const { user, logout, isAdmin } = useAuth();
+  const { user, logout, isAdmin, isStaff, isAdminLevel } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [sheetOpen, setSheetOpen] = useState(false);
 
-  const navItems = useMemo(() => (isAdmin ? adminSections : clientNav), [isAdmin]);
+  const navItems = useMemo(() => {
+    if (!isAdminLevel) return clientNav;
+    return adminSections.filter((item) => !(item.adminOnly && isStaff));
+  }, [isAdminLevel, isStaff]);
 
   if (!user) return <>{children}</>;
 
@@ -65,15 +80,20 @@ export default function AppLayout({ children }: { children: ReactNode }) {
               <Shield className="mr-1 inline h-3 w-3" />Admin
             </span>
           )}
+          {isStaff && (
+            <span className="rounded-full bg-white/15 px-2 py-1 font-semibold text-white">
+              <UsersRound className="mr-1 inline h-3 w-3" />Empleado
+            </span>
+          )}
         </div>
       </div>
 
       <div className="mb-2 px-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-        {isAdmin ? 'Panel lateral' : 'Navegación'}
+        {isAdminLevel ? 'Panel lateral' : 'Navegación'}
       </div>
 
       {navItems.map((item) => {
-        const active = location.pathname === item.path || (!isAdmin && location.pathname === item.path);
+        const active = location.pathname === item.path;
         return (
           <button
             key={item.path}
@@ -132,7 +152,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           </Sheet>
           <div className="min-w-0 flex-1">
             <span className="block font-heading text-lg font-bold text-foreground">RealPlay</span>
-            <p className="truncate text-xs text-muted-foreground">{isAdmin ? 'Administración' : 'Reservas deportivas'}</p>
+            <p className="truncate text-xs text-muted-foreground">{isAdminLevel ? (isStaff ? 'Panel de empleado' : 'Administración') : 'Reservas deportivas'}</p>
           </div>
         </header>
 

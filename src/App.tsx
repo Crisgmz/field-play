@@ -9,7 +9,6 @@ import AppLayout from "@/components/AppLayout";
 import Login from "@/pages/Login";
 import Register from "@/pages/Register";
 import Home from "@/pages/Home";
-import ClubDetail from "@/pages/ClubDetail";
 import BookingFlow from "@/pages/BookingFlow";
 import MyBookings from "@/pages/MyBookings";
 import Profile from "@/pages/Profile";
@@ -34,10 +33,10 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 function AdminRoute({ children }: { children: React.ReactNode }) {
-  const { user, isAdmin, loading } = useAuth();
+  const { user, isAdminLevel, loading } = useAuth();
   if (loading) return <LoadingScreen />;
   if (!user) return <Navigate to="/login" replace />;
-  if (!isAdmin) return <Navigate to="/" replace />;
+  if (!isAdminLevel) return <Navigate to="/" replace />;
   return <AppLayout>{children}</AppLayout>;
 }
 
@@ -51,7 +50,7 @@ function AppRoutes() {
       <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
       <Route path="/register" element={user ? <Navigate to="/" replace /> : <Register />} />
       <Route path="/" element={<ProtectedRoute><Home /></ProtectedRoute>} />
-      <Route path="/clubs/:clubId" element={<ProtectedRoute><ClubDetail /></ProtectedRoute>} />
+      <Route path="/clubs/:clubId" element={<ProtectedRoute><BookingFlow /></ProtectedRoute>} />
       <Route path="/clubs/:clubId/book" element={<ProtectedRoute><BookingFlow /></ProtectedRoute>} />
       <Route path="/bookings" element={<ProtectedRoute><MyBookings /></ProtectedRoute>} />
       <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />

@@ -51,9 +51,9 @@ export default function MyBookings() {
     }
 
     setBusyId(booking.id);
-    const ok = await replacePaymentProof(booking.id, file);
+    const result = await replacePaymentProof(booking.id, file);
     setBusyId(null);
-    if (ok) {
+    if (result.ok) {
       setProofUrls((prev) => {
         const next = { ...prev };
         delete next[booking.id];
@@ -61,7 +61,7 @@ export default function MyBookings() {
       });
       toast.success('Comprobante reemplazado. El club lo revisará.');
     } else {
-      toast.error('No se pudo reemplazar el comprobante.');
+      toast.error(result.message);
     }
   };
 

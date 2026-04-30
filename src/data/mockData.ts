@@ -111,9 +111,9 @@ export const mockPricingRules: PricingRule[] = [
 function buildUnits(fieldId: string): FieldUnit[] {
   return [
     { id: `${fieldId}-f11`, field_id: fieldId, type: 'F11', name: 'F11', parent_id: null, slot_ids: ['S1', 'S2', 'S3', 'S4', 'S5', 'S6'], is_active: true },
-    { id: `${fieldId}-f7-1`, field_id: fieldId, type: 'F7', name: 'F7_1', parent_id: null, slot_ids: ['S1', 'S2'], is_active: true },
-    { id: `${fieldId}-f7-2`, field_id: fieldId, type: 'F7', name: 'F7_2', parent_id: null, slot_ids: ['S3', 'S4'], is_active: true },
-    { id: `${fieldId}-f7-3`, field_id: fieldId, type: 'F7', name: 'F7_3', parent_id: null, slot_ids: ['S5', 'S6'], is_active: true },
+    { id: `${fieldId}-f7-1`, field_id: fieldId, type: 'F7', name: 'F7_1', parent_id: null, slot_ids: ['S1', 'S4'], is_active: true },
+    { id: `${fieldId}-f7-2`, field_id: fieldId, type: 'F7', name: 'F7_2', parent_id: null, slot_ids: ['S2', 'S5'], is_active: true },
+    { id: `${fieldId}-f7-3`, field_id: fieldId, type: 'F7', name: 'F7_3', parent_id: null, slot_ids: ['S3', 'S6'], is_active: true },
     { id: `${fieldId}-f5-1`, field_id: fieldId, type: 'F5', name: 'C1', parent_id: null, slot_ids: ['S1'], is_active: true },
     { id: `${fieldId}-f5-2`, field_id: fieldId, type: 'F5', name: 'C2', parent_id: null, slot_ids: ['S2'], is_active: true },
     { id: `${fieldId}-f5-3`, field_id: fieldId, type: 'F5', name: 'C3', parent_id: null, slot_ids: ['S3'], is_active: true },

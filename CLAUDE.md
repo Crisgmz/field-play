@@ -20,7 +20,7 @@ A physical field has 6 "slots" (S1–S6). These slots compose into playing units
 - **F7** (half field): uses 2 adjacent slots (S1+S2, S3+S4, S5+S6) → 3 possible F7 courts
 - **F5** (mini court): uses 1 slot each → 6 possible F5 courts
 
-**Business rule:** 1 F11 = 3 F7 = 6 F5. Each F7 contains exactly 2 F5. Booking any unit locks its physical slots, preventing conflicting bookings.
+**Business rule:** 1 F11 = 3 F7 = 6 F5. Each F7 contains exactly 2 F5 (the two stacked slots in its column — e.g., F7_1 = S1 + S4, and contains F5 C1 + C4). Booking any unit locks its physical slots, preventing conflicting bookings.
 
 ### Court Configuration Layouts
 Fields can be created with one of four layouts:

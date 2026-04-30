@@ -1,20 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
   BellRing,
   Building2,
   Calendar,
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
   DollarSign,
   Edit2,
   ExternalLink,
-  HelpCircle,
   Info,
   LayoutGrid,
-  Map,
   Pencil,
   Plus,
   Save,
@@ -25,22 +22,31 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAppData } from '@/contexts/AppDataContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { Block, FieldType } from '@/types';
 import { TIME_SLOTS } from '@/data/mockData';
-import { timeOverlaps } from '@/lib/availability';
 import CourtLayoutPreview from '@/components/CourtLayoutPreview';
 import FieldConfigPanel from '@/components/FieldConfigPanel';
 import VenueScheduleEditor from '@/components/VenueScheduleEditor';
 import ClosedDatesEditor from '@/components/ClosedDatesEditor';
+import ClubGalleryManager from '@/components/ClubGalleryManager';
+import TeamPanel from '@/components/TeamPanel';
+import AdminWeekCalendar from '@/components/AdminWeekCalendar';
+import ReportsSection from '@/components/ReportsSection';
+import { formatBlockType, formatBookingDate, formatBookingStatus, formatCurrency, getStatusTone } from '@/lib/bookingFormat';
 import { Settings } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
-const adminSections = ['overview', 'calendar', 'bookings', 'blocks', 'clubs', 'fields', 'config', 'pricing'] as const;
+const adminSections = ['overview', 'calendar', 'bookings', 'blocks', 'reports', 'clubs', 'fields', 'config', 'pricing', 'team'] as const;
 type AdminSection = (typeof adminSections)[number];
+
+// Sections a staff member is allowed to view. Anything outside this set
+// must redirect to the overview when accessed by a staff account.
+const STAFF_ALLOWED_SECTIONS = new Set<AdminSection>(['overview', 'calendar', 'bookings', 'blocks']);
 
 const layoutLabels = {
   full_11: 'Cancha completa — solo Fútbol 11',
@@ -58,7 +64,8 @@ const layoutDescriptions: Record<keyof typeof layoutLabels, string> = {
 
 export default function AdminDashboard() {
   const { section } = useParams();
-  const { user } = useAuth();
+  const { user, isStaff, canManageTeam } = useAuth();
+  const navigate = useNavigate();
   const {
     clubs,
     fields,
@@ -87,10 +94,20 @@ export default function AdminDashboard() {
     ? ((section as AdminSection) || 'overview')
     : 'overview';
 
+  useEffect(() => {
+    if (isStaff && !STAFF_ALLOWED_SECTIONS.has(currentSection)) {
+      toast.error('No tienes permisos para esta sección.');
+      navigate('/admin/overview', { replace: true });
+    }
+  }, [isStaff, currentSection, navigate]);
+
   const [calendarDate, setCalendarDate] = useState(new Date().toISOString().split('T')[0]);
   const [selectedMobileCalendarDate, setSelectedMobileCalendarDate] = useState<string | null>(null);
   const [blockDialogOpen, setBlockDialogOpen] = useState(false);
   const [clubDialogOpen, setClubDialogOpen] = useState(false);
+  const [deleteFieldTarget, setDeleteFieldTarget] = useState<string | null>(null);
+  const [deleteFieldBusy, setDeleteFieldBusy] = useState(false);
+  const [deleteBlockTarget, setDeleteBlockTarget] = useState<string | null>(null);
   const [fieldDialogOpen, setFieldDialogOpen] = useState(false);
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
   const [selectedBookingProofUrl, setSelectedBookingProofUrl] = useState<string | null>(null);
@@ -101,16 +118,32 @@ export default function AdminDashboard() {
 
   // Edit states
   const [editingClubId, setEditingClubId] = useState<string | null>(null);
-  const [editClubForm, setEditClubForm] = useState({ name: '', location: '', description: '', open_time: '', close_time: '' });
+  const [editClubForm, setEditClubForm] = useState({
+    name: '',
+    location: '',
+    description: '',
+    open_time: '',
+    close_time: '',
+    phone: '',
+    email: '',
+    amenities: '',
+  });
   const [editingFieldId, setEditingFieldId] = useState<string | null>(null);
   const [editFieldForm, setEditFieldForm] = useState({ name: '', surface: '' });
   const [editingPricingId, setEditingPricingId] = useState<string | null>(null);
   const [editPricingForm, setEditPricingForm] = useState({ price_per_hour: '', minimum_minutes: '' });
 
+  // `target` selecciona qué unidades del field se bloquean:
+  //   'all'           → toda la cancha (todas las unidades)
+  //   'type:F11'      → todas las modalidades F11 del field (suele ser solo 1)
+  //   'type:F7'       → todas las F7
+  //   'type:F5'       → todas las F5
+  //   'unit:<uuid>'   → una sola unidad específica (ej. C1, F7_1)
   const [blockForm, setBlockForm] = useState({
     field_id: '',
-    unit_type: 'all' as FieldType | 'all',
-    date: new Date().toISOString().split('T')[0],
+    target: 'all' as string,
+    date_start: new Date().toISOString().split('T')[0],
+    date_end: new Date().toISOString().split('T')[0],
     start_time: '18:00',
     end_time: '20:00',
     type: 'maintenance' as Block['type'],
@@ -154,16 +187,6 @@ export default function AdminDashboard() {
     date.setDate(date.getDate() - date.getDay() + i);
     return date.toISOString().split('T')[0];
   });
-
-  const displayHours = TIME_SLOTS.slice(0, -1);
-
-  const getEventsForCell = (date: string, time: string) => {
-    const timeIdx = TIME_SLOTS.indexOf(time);
-    const nextTime = TIME_SLOTS[timeIdx + 1] || '23:59';
-    const cellBookings = bookings.filter((booking) => booking.date === date && booking.status === 'confirmed' && timeOverlaps(time, nextTime, booking.start_time, booking.end_time));
-    const cellBlocks = blocks.filter((block) => block.date === date && timeOverlaps(time, nextTime, block.start_time, block.end_time));
-    return { cellBookings, cellBlocks };
-  };
 
   const getDayEvents = (date: string) => {
     return [
@@ -290,36 +313,51 @@ export default function AdminDashboard() {
     if (!field) return;
 
     let unitIds: string[];
-    if (blockForm.unit_type === 'all') {
-      // Bloquear TODAS las unidades del campo
+    if (blockForm.target === 'all') {
       unitIds = field.units.map((unit) => unit.id);
+    } else if (blockForm.target.startsWith('type:')) {
+      const wanted = blockForm.target.slice('type:'.length) as FieldType;
+      unitIds = field.units.filter((unit) => unit.type === wanted).map((unit) => unit.id);
+    } else if (blockForm.target.startsWith('unit:')) {
+      const unitId = blockForm.target.slice('unit:'.length);
+      unitIds = field.units.some((u) => u.id === unitId) ? [unitId] : [];
     } else {
-      unitIds = field.units.filter((unit) => unit.type === blockForm.unit_type).map((unit) => unit.id);
+      unitIds = [];
     }
 
     if (unitIds.length === 0) {
-      toast.error('No hay unidades para bloquear en este campo.');
+      toast.error('No hay unidades para bloquear en esta cancha.');
       return;
     }
 
-    const created = await createBlock({
+    if (blockForm.date_end < blockForm.date_start) {
+      toast.error('La fecha de fin no puede ser anterior a la fecha de inicio.');
+      return;
+    }
+
+    const result = await createBlock({
       field_id: blockForm.field_id,
       field_unit_ids: unitIds,
-      date: blockForm.date,
+      date: blockForm.date_start,
+      date_end: blockForm.date_end,
       start_time: blockForm.start_time,
       end_time: blockForm.end_time,
       type: blockForm.type,
       reason: blockForm.reason || 'Bloqueo administrativo',
     });
 
-    if (!created) {
-      toast.error('No se pudo crear el bloqueo.');
+    if (!result.ok) {
+      toast.error(result.message);
       return;
     }
 
     setBlockDialogOpen(false);
     setBlockForm((prev) => ({ ...prev, reason: '' }));
-    toast.success('Bloqueo creado correctamente.');
+    if (result.daysCreated > 1) {
+      toast.success(`Bloqueo creado para ${result.daysCreated} días.`);
+    } else {
+      toast.success('Bloqueo creado correctamente.');
+    }
   };
 
   const handleCreateClub = async () => {
@@ -343,6 +381,10 @@ export default function AdminDashboard() {
   };
 
   const handleUpdateClub = async (clubId: string) => {
+    const amenities = editClubForm.amenities
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean);
     const success = await updateClub({
       id: clubId,
       name: editClubForm.name,
@@ -350,6 +392,9 @@ export default function AdminDashboard() {
       description: editClubForm.description,
       open_time: editClubForm.open_time,
       close_time: editClubForm.close_time,
+      phone: editClubForm.phone || null,
+      email: editClubForm.email || null,
+      amenities,
     });
     if (success) {
       setEditingClubId(null);
@@ -404,13 +449,24 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleDeleteField = async (fieldId: string) => {
-    const success = await deleteField(fieldId);
-    if (success) {
-      toast.success('Campo desactivado.');
-    } else {
-      toast.error('Error al desactivar el campo.');
+  const confirmDeleteField = async () => {
+    if (!deleteFieldTarget) return;
+    setDeleteFieldBusy(true);
+    const result = await deleteField(deleteFieldTarget);
+    setDeleteFieldBusy(false);
+    if (!result.ok) {
+      // Si hay reservas activas a futuro, dejamos el dialog abierto para que el usuario
+      // pueda cancelar manualmente; el copy del dialog ya explicará la situación.
+      if (result.reason === 'has_future_active_bookings') {
+        toast.error(result.message);
+      } else {
+        toast.error(result.message);
+        setDeleteFieldTarget(null);
+      }
+      return;
     }
+    setDeleteFieldTarget(null);
+    toast.success(result.message);
   };
 
   const handleUpdatePricing = async (ruleId: string) => {
@@ -432,10 +488,12 @@ export default function AdminDashboard() {
     calendar: 'Calendario operativo',
     bookings: 'Gestión de reservas',
     blocks: 'Bloqueos y mantenimiento',
+    reports: 'Reportes',
     clubs: 'Centros deportivos',
     fields: 'Canchas físicas',
     config: 'Configuración de canchas',
     pricing: 'Precios por modalidad',
+    team: 'Equipo',
   };
 
   const sectionDescriptions: Record<AdminSection, string> = {
@@ -443,10 +501,12 @@ export default function AdminDashboard() {
     calendar: 'Vista semanal de reservas y bloqueos.',
     bookings: 'Administra el estado de las reservas de tus clientes.',
     blocks: 'Bloquea horarios para mantenimiento, prácticas o eventos.',
+    reports: 'Métricas de ingresos, ocupación, clientes y operación.',
     clubs: 'Configura la información general de tu centro deportivo.',
     fields: 'Cada cancha física se divide en zonas que permiten jugar F11, F7 o F5. Aquí configuras la estructura.',
     config: 'Visualiza conflictos, activa/desactiva unidades y configura horarios operativos.',
     pricing: 'Define cuánto cobra cada modalidad de juego por hora.',
+    team: 'Invita y gestiona empleados con permisos limitados.',
   };
 
   const getClubPrices = (clubId: string) => {
@@ -493,15 +553,22 @@ export default function AdminDashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {latestBookings.slice(0, 6).map((booking) => (
-                      <tr key={booking.id} className="border-t border-border">
-                        <td className="px-4 py-3">{booking.date}</td>
-                        <td className="px-4 py-3 text-muted-foreground">{booking.start_time} – {booking.end_time}</td>
-                        <td className="px-4 py-3">{booking.field_type}</td>
-                        <td className="px-4 py-3">{booking.status}</td>
-                        <td className="px-4 py-3">RD$ {booking.total_price.toLocaleString()}</td>
-                      </tr>
-                    ))}
+                    {latestBookings.slice(0, 6).map((booking) => {
+                      const tone = getStatusTone(booking.status);
+                      return (
+                        <tr key={booking.id} className="border-t border-border">
+                          <td className="px-4 py-3 text-foreground">{formatBookingDate(booking.date)}</td>
+                          <td className="px-4 py-3 text-muted-foreground">{booking.start_time} – {booking.end_time}</td>
+                          <td className="px-4 py-3">{booking.field_type}</td>
+                          <td className="px-4 py-3">
+                            <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${tone.bg} ${tone.text}`}>
+                              {formatBookingStatus(booking.status)}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 font-medium text-foreground">{formatCurrency(booking.total_price)}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -590,94 +657,14 @@ export default function AdminDashboard() {
               })}
             </div>
 
-            <div className="hidden overflow-x-auto rounded-2xl border border-border bg-card shadow-sm md:block">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-border">
-                    <th className="sticky left-0 z-10 bg-card px-3 py-2 text-left text-muted-foreground">Hora</th>
-                    {weekDates.map((date) => {
-                      const dateObj = new Date(`${date}T00:00:00`);
-                      return (
-                        <th key={date} className="min-w-[110px] px-2 py-2 text-center text-muted-foreground">
-                          <div>{dateObj.toLocaleDateString('es', { weekday: 'short' })}</div>
-                          <div className="font-heading text-sm text-foreground">{dateObj.getDate()}</div>
-                        </th>
-                      );
-                    })}
-                  </tr>
-                </thead>
-                <tbody>
-                  {displayHours.map((time) => (
-                    <tr key={time} className="border-b border-border last:border-0">
-                      <td className="sticky left-0 z-10 bg-card px-3 py-2 font-medium text-muted-foreground">{time}</td>
-                      {weekDates.map((date) => {
-                        const { cellBookings, cellBlocks } = getEventsForCell(date, time);
-                        const isOccupied = cellBookings.length > 0 || cellBlocks.length > 0;
-                        return (
-                          <td key={`${date}-${time}`} className={`min-w-[120px] border-r border-border p-1 align-top transition-colors ${isOccupied ? 'bg-muted/10' : 'hover:bg-muted/30'}`}>
-                            {cellBookings.map((booking) => {
-                              const timeIdx = TIME_SLOTS.indexOf(time);
-                              const nextTime = TIME_SLOTS[timeIdx + 1] || '23:59';
-                              const isStart = booking.start_time === time;
-                              const isEnd = booking.end_time === nextTime;
-                              const field = fields.find((f) => f.units.some((u) => u.id === booking.field_unit_id));
-                              const unit = field?.units.find((u) => u.id === booking.field_unit_id);
-                              
-                              return (
-                                <div 
-                                  key={booking.id} 
-                                  className={`overflow-hidden transition-all shadow-sm bg-primary ${
-                                    isStart ? 'rounded-t-md p-1.5' : 'bg-opacity-60 border-l-4 border-primary p-0.5'
-                                  } ${isEnd ? 'rounded-b-md mb-2' : 'mb-0'} ${
-                                    isStart ? 'text-primary-foreground' : 'text-primary-foreground/80'
-                                  }`}
-                                  title={`${booking.field_type} - ${unit?.name}`}
-                                >
-                                  {isStart ? (
-                                    <div className="flex flex-col leading-tight">
-                                      <span className="font-bold truncate text-[10px]">{unit?.name || booking.field_type}</span>
-                                      <span className="text-[8px] opacity-80">Reserva</span>
-                                    </div>
-                                  ) : (
-                                    <div className="h-2" />
-                                  )}
-                                </div>
-                              );
-                            })}
-                            {cellBlocks.map((block) => {
-                              const timeIdx = TIME_SLOTS.indexOf(time);
-                              const nextTime = TIME_SLOTS[timeIdx + 1] || '23:59';
-                              const isStart = block.start_time === time;
-                              const isEnd = block.end_time === nextTime;
-                              
-                              return (
-                                <div 
-                                  key={block.id} 
-                                  className={`overflow-hidden transition-all shadow-sm bg-destructive ${
-                                    isStart ? 'rounded-t-md p-1.5' : 'bg-opacity-60 border-l-4 border-destructive p-0.5'
-                                  } ${isEnd ? 'rounded-b-md mb-2' : 'mb-0'} ${
-                                    isStart ? 'text-destructive-foreground' : 'text-destructive-foreground/80'
-                                  }`}
-                                  title={block.reason}
-                                >
-                                  {isStart ? (
-                                    <div className="flex flex-col leading-tight">
-                                      <span className="font-bold truncate text-[10px]">{block.reason}</span>
-                                      <span className="text-[8px] opacity-80 uppercase font-semibold">{block.type}</span>
-                                    </div>
-                                  ) : (
-                                    <div className="h-2" />
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="hidden md:block">
+              <AdminWeekCalendar
+                weekDates={weekDates}
+                bookings={bookings}
+                blocks={blocks}
+                fields={fields}
+                onBookingClick={(id) => void openBookingDetails(id)}
+              />
             </div>
           </div>
         );
@@ -955,8 +942,8 @@ export default function AdminDashboard() {
                 </DialogHeader>
                 <div className="space-y-4">
                   <div>
-                    <label className="mb-1 block text-sm font-medium">Campo</label>
-                    <Select value={blockForm.field_id} onValueChange={(value) => setBlockForm((prev) => ({ ...prev, field_id: value }))}>
+                    <label className="mb-1 block text-sm font-medium">Cancha</label>
+                    <Select value={blockForm.field_id} onValueChange={(value) => setBlockForm((prev) => ({ ...prev, field_id: value, target: 'all' }))}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
                         {fields.map((field) => {
@@ -967,19 +954,77 @@ export default function AdminDashboard() {
                     </Select>
                   </div>
                   <div>
-                    <label className="mb-1 block text-sm font-medium">Tipo de unidad</label>
-                    <Select value={blockForm.unit_type} onValueChange={(value) => setBlockForm((prev) => ({ ...prev, unit_type: value as FieldType | 'all' }))}>
+                    <label className="mb-1 block text-sm font-medium">Qué bloquear</label>
+                    <Select value={blockForm.target} onValueChange={(value) => setBlockForm((prev) => ({ ...prev, target: value }))}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="all">Todas las unidades (cancha completa)</SelectItem>
-                        <SelectItem value="F11">Solo F11</SelectItem>
-                        <SelectItem value="F7">Solo F7</SelectItem>
-                        <SelectItem value="F5">Solo F5</SelectItem>
+                        <SelectItem value="all">Toda la cancha (todas las modalidades)</SelectItem>
+                        {(() => {
+                          const selectedField = fields.find((f) => f.id === blockForm.field_id);
+                          if (!selectedField) return null;
+                          const hasF11 = selectedField.units.some((u) => u.type === 'F11');
+                          const hasF7 = selectedField.units.some((u) => u.type === 'F7');
+                          const hasF5 = selectedField.units.some((u) => u.type === 'F5');
+                          const sortedUnits = [...selectedField.units].sort((a, b) => {
+                            const order: Record<FieldType, number> = { F11: 0, F7: 1, F5: 2 };
+                            if (order[a.type] !== order[b.type]) return order[a.type] - order[b.type];
+                            return a.name.localeCompare(b.name);
+                          });
+                          return (
+                            <>
+                              {hasF11 && <SelectItem value="type:F11">Todas las modalidades F11</SelectItem>}
+                              {hasF7 && <SelectItem value="type:F7">Todas las modalidades F7</SelectItem>}
+                              {hasF5 && <SelectItem value="type:F5">Todas las modalidades F5</SelectItem>}
+                              <div className="my-1 border-t border-border" aria-hidden />
+                              {sortedUnits.map((unit) => (
+                                <SelectItem key={unit.id} value={`unit:${unit.id}`}>
+                                  {unit.name} · {unit.type} · {unit.slot_ids.join(' + ')}
+                                </SelectItem>
+                              ))}
+                            </>
+                          );
+                        })()}
                       </SelectContent>
                     </Select>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Si bloqueas una unidad específica, las modalidades que comparten zonas físicas también se bloquean automáticamente.
+                    </p>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <Input type="date" value={blockForm.date} onChange={(event) => setBlockForm((prev) => ({ ...prev, date: event.target.value }))} />
+                  <div>
+                    <label className="mb-1 block text-sm font-medium">Rango de fechas</label>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div>
+                        <span className="mb-1 block text-xs text-muted-foreground">Desde</span>
+                        <Input
+                          type="date"
+                          value={blockForm.date_start}
+                          onChange={(event) => {
+                            const value = event.target.value;
+                            setBlockForm((prev) => ({
+                              ...prev,
+                              date_start: value,
+                              // Si el "hasta" queda antes del nuevo "desde", lo igualamos.
+                              date_end: prev.date_end < value ? value : prev.date_end,
+                            }));
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <span className="mb-1 block text-xs text-muted-foreground">Hasta (inclusivo)</span>
+                        <Input
+                          type="date"
+                          min={blockForm.date_start}
+                          value={blockForm.date_end}
+                          onChange={(event) => setBlockForm((prev) => ({ ...prev, date_end: event.target.value }))}
+                        />
+                      </div>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Para un solo día deja ambas fechas iguales. La franja horaria se aplica a cada día del rango.
+                    </p>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium">Tipo</label>
                     <Select value={blockForm.type} onValueChange={(value) => setBlockForm((prev) => ({ ...prev, type: value as Block['type'] }))}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
@@ -1011,31 +1056,95 @@ export default function AdminDashboard() {
 
             <div className="space-y-3">
               {blocks.length === 0 && <p className="text-sm text-muted-foreground">No hay bloqueos activos.</p>}
-              {blocks.map((block) => {
-                const blockField = fields.find((f) => f.id === block.field_id);
-                const blockClub = clubs.find((c) => c.id === blockField?.club_id);
-                return (
-                  <div key={block.id} className="rounded-2xl border border-border bg-card p-4 shadow-sm">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <h3 className="font-heading text-sm font-bold text-card-foreground">{block.reason}</h3>
-                        <p className="mt-1 text-xs text-muted-foreground">{blockClub?.name} · {blockField?.name}</p>
-                        <p className="mt-1 text-xs text-muted-foreground">{block.date} · {block.start_time} – {block.end_time}</p>
-                        <p className="mt-1 text-xs text-muted-foreground">Unidades afectadas: {block.field_unit_ids.length}</p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="rounded-full bg-destructive px-2 py-1 text-[10px] font-bold text-destructive-foreground">{block.type}</span>
-                        <Button variant="ghost" size="sm" onClick={() => {
-                          void deleteBlock(block.id);
-                          toast.success('Bloqueo eliminado.');
-                        }}>
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+              {(() => {
+                // Agrupar bloqueos: los que comparten batch_id se muestran como una sola tarjeta de rango.
+                type Group = {
+                  representativeId: string;
+                  field_id: string;
+                  start_time: string;
+                  end_time: string;
+                  type: Block['type'];
+                  reason: string;
+                  unitsAffected: number;
+                  dates: string[];
+                  batchId: string | null;
+                };
+                const grouped = new Map<string, Group>();
+                blocks.forEach((block) => {
+                  const key = block.batch_id ?? `single-${block.id}`;
+                  const existing = grouped.get(key);
+                  if (existing) {
+                    existing.dates.push(block.date);
+                  } else {
+                    grouped.set(key, {
+                      representativeId: block.id,
+                      field_id: block.field_id,
+                      start_time: block.start_time,
+                      end_time: block.end_time,
+                      type: block.type,
+                      reason: block.reason,
+                      unitsAffected: block.field_unit_ids.length,
+                      dates: [block.date],
+                      batchId: block.batch_id ?? null,
+                    });
+                  }
+                });
+                const groups = Array.from(grouped.values()).sort((a, b) => {
+                  const aStart = a.dates.slice().sort()[0];
+                  const bStart = b.dates.slice().sort()[0];
+                  return aStart.localeCompare(bStart);
+                });
+
+                return groups.map((group) => {
+                  const blockField = fields.find((f) => f.id === group.field_id);
+                  const blockClub = clubs.find((c) => c.id === blockField?.club_id);
+                  const sortedDates = group.dates.slice().sort();
+                  const firstDate = sortedDates[0];
+                  const lastDate = sortedDates[sortedDates.length - 1];
+                  const isRange = sortedDates.length > 1;
+
+                  return (
+                    <div key={group.representativeId} className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="font-heading text-sm font-bold text-card-foreground">{group.reason}</h3>
+                            {isRange && (
+                              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
+                                {sortedDates.length} días
+                              </span>
+                            )}
+                          </div>
+                          <p className="mt-1 text-xs text-muted-foreground">{blockClub?.name} · {blockField?.name}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {isRange
+                              ? `${formatBookingDate(firstDate)} → ${formatBookingDate(lastDate)}`
+                              : formatBookingDate(firstDate)}
+                            {' · '}
+                            {group.start_time} – {group.end_time}
+                          </p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            Unidades afectadas: {group.unitsAffected}
+                            {isRange ? ' · una entrada por cada día del rango' : ''}
+                          </p>
+                        </div>
+                        <div className="flex flex-shrink-0 items-center gap-2">
+                          <span className="rounded-full bg-zinc-700 px-2 py-1 text-[10px] font-bold uppercase text-white">
+                            {formatBlockType(group.type)}
+                          </span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setDeleteBlockTarget(group.representativeId)}
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                });
+              })()}
             </div>
           </div>
         );
@@ -1083,6 +1192,20 @@ export default function AdminDashboard() {
                             <Input type="time" value={editClubForm.close_time} onChange={(e) => setEditClubForm((p) => ({ ...p, close_time: e.target.value }))} />
                           </div>
                         </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="mb-1 block text-xs text-muted-foreground">Teléfono</label>
+                            <Input value={editClubForm.phone} onChange={(e) => setEditClubForm((p) => ({ ...p, phone: e.target.value }))} placeholder="809-555-0000" />
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-xs text-muted-foreground">Email de contacto</label>
+                            <Input type="email" value={editClubForm.email} onChange={(e) => setEditClubForm((p) => ({ ...p, email: e.target.value }))} placeholder="info@club.com" />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs text-muted-foreground">Amenidades (separadas por coma)</label>
+                          <Input value={editClubForm.amenities} onChange={(e) => setEditClubForm((p) => ({ ...p, amenities: e.target.value }))} placeholder="Estacionamiento, Vestidores, Cafetería" />
+                        </div>
                         <div className="flex gap-2">
                           <Button size="sm" onClick={() => void handleUpdateClub(club.id)}><Save className="mr-1 h-3 w-3" />Guardar</Button>
                           <Button size="sm" variant="ghost" onClick={() => setEditingClubId(null)}><X className="mr-1 h-3 w-3" />Cancelar</Button>
@@ -1103,12 +1226,26 @@ export default function AdminDashboard() {
                               description: club.description,
                               open_time: club.open_time,
                               close_time: club.close_time,
+                              phone: club.phone ?? '',
+                              email: club.email ?? '',
+                              amenities: (club.amenities ?? []).join(', '),
                             });
                           }}>
                             <Pencil className="h-4 w-4" />
                           </Button>
                         </div>
                         <p className="mt-3 text-sm text-muted-foreground">{club.description}</p>
+
+                        {(club.phone || club.email || (club.amenities && club.amenities.length > 0)) && (
+                          <div className="mt-3 space-y-1 text-xs text-muted-foreground">
+                            {club.phone && <p>Tel: <span className="text-foreground">{club.phone}</span></p>}
+                            {club.email && <p>Email: <span className="text-foreground">{club.email}</span></p>}
+                            {club.amenities && club.amenities.length > 0 && (
+                              <p>Amenidades: <span className="text-foreground">{club.amenities.join(' · ')}</span></p>
+                            )}
+                          </div>
+                        )}
+
                         <div className="mt-4 space-y-2">
                           <div className="flex items-center justify-between text-sm">
                             <span className="text-muted-foreground">F5</span>
@@ -1128,6 +1265,10 @@ export default function AdminDashboard() {
                           <span className={club.is_active ? 'text-emerald-600' : 'text-destructive'}>
                             {club.is_active ? 'Activo' : 'Inactivo'}
                           </span>
+                        </div>
+
+                        <div className="mt-5 border-t border-border pt-4">
+                          <ClubGalleryManager clubId={club.id} />
                         </div>
                       </>
                     )}
@@ -1305,7 +1446,7 @@ export default function AdminDashboard() {
                           }}>
                             <Edit2 className="h-4 w-4" />
                           </Button>
-                          <Button variant="ghost" size="sm" onClick={() => void handleDeleteField(field.id)}>
+                          <Button variant="ghost" size="sm" onClick={() => setDeleteFieldTarget(field.id)}>
                             <Trash2 className="h-4 w-4 text-destructive" />
                           </Button>
                         </div>
@@ -1576,8 +1717,49 @@ export default function AdminDashboard() {
             })}
           </div>
         );
+
+      case 'team':
+        if (!canManageTeam) {
+          return (
+            <div className="rounded-2xl border border-dashed border-border bg-card p-8 text-center text-sm text-muted-foreground">
+              Solo el dueño del club puede gestionar el equipo.
+            </div>
+          );
+        }
+        return <TeamPanel />;
+
+      case 'reports':
+        return <ReportsSection />;
     }
   };
+
+  const fieldToDelete = fields.find((f) => f.id === deleteFieldTarget) ?? null;
+  const fieldUnitIdsToDelete = fieldToDelete?.units.map((u) => u.id) ?? [];
+  const today = new Date().toISOString().split('T')[0];
+  const futureActiveBookings = fieldToDelete
+    ? bookings.filter(
+        (b) =>
+          fieldUnitIdsToDelete.includes(b.field_unit_id) &&
+          (b.status === 'pending' || b.status === 'confirmed') &&
+          b.date >= today,
+      )
+    : [];
+  const cleanableBookings = fieldToDelete
+    ? bookings.filter(
+        (b) =>
+          fieldUnitIdsToDelete.includes(b.field_unit_id) &&
+          !(b.status !== 'cancelled' && b.date >= today),
+      )
+    : [];
+  const hasFutureActiveBookings = futureActiveBookings.length > 0;
+
+  const blockToDelete = blocks.find((b) => b.id === deleteBlockTarget) ?? null;
+  const blockBatchSiblings = blockToDelete?.batch_id
+    ? blocks.filter((b) => b.batch_id === blockToDelete.batch_id)
+    : blockToDelete
+      ? [blockToDelete]
+      : [];
+  const blockToDeleteIsRange = blockBatchSiblings.length > 1;
 
   return (
     <div className="mx-auto max-w-7xl">
@@ -1587,6 +1769,79 @@ export default function AdminDashboard() {
       </div>
 
       {renderSection()}
+
+      <AlertDialog open={!!deleteBlockTarget} onOpenChange={(open) => !open && setDeleteBlockTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {blockToDeleteIsRange ? `¿Eliminar el rango de ${blockBatchSiblings.length} bloqueos?` : '¿Eliminar este bloqueo?'}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {blockToDeleteIsRange
+                ? `Se eliminarán los ${blockBatchSiblings.length} bloqueos creados como un solo rango. Las reservas no se ven afectadas.`
+                : 'El bloqueo se elimina y los horarios quedan disponibles otra vez. Las reservas no se ven afectadas.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={async () => {
+                if (!deleteBlockTarget) return;
+                await deleteBlock(deleteBlockTarget);
+                setDeleteBlockTarget(null);
+                toast.success(blockToDeleteIsRange ? 'Rango de bloqueos eliminado.' : 'Bloqueo eliminado.');
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              {blockToDeleteIsRange ? 'Eliminar rango' : 'Eliminar'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={!!deleteFieldTarget} onOpenChange={(open) => !open && setDeleteFieldTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar la cancha "{fieldToDelete?.name}"?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 text-sm text-muted-foreground">
+                {hasFutureActiveBookings ? (
+                  <p>
+                    Esta cancha tiene <strong className="text-destructive">{futureActiveBookings.length}</strong>{' '}
+                    {futureActiveBookings.length === 1 ? 'reserva activa' : 'reservas activas'} a futuro
+                    (pendiente{futureActiveBookings.length === 1 ? '' : 's'} o confirmada{futureActiveBookings.length === 1 ? '' : 's'}).
+                    Cancélala{futureActiveBookings.length === 1 ? '' : 's'} desde "Reservas" antes de eliminar la cancha.
+                  </p>
+                ) : (
+                  <>
+                    <p>
+                      La cancha y todas sus modalidades (F11, F7, F5) se eliminarán de forma permanente.
+                      Esta acción no se puede deshacer.
+                    </p>
+                    {cleanableBookings.length > 0 && (
+                      <p>
+                        También se eliminarán <strong>{cleanableBookings.length}</strong> reserva{cleanableBookings.length === 1 ? '' : 's'} histórica{cleanableBookings.length === 1 ? '' : 's'} (canceladas o pasadas) asociadas a esta cancha.
+                      </p>
+                    )}
+                  </>
+                )}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteFieldBusy}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => void confirmDeleteField()}
+              disabled={deleteFieldBusy || hasFutureActiveBookings}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              {deleteFieldBusy ? 'Procesando...' : 'Eliminar permanentemente'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -8,13 +8,14 @@ import {
   sendBookingReceivedEmail,
 } from '@/lib/bookingEmail';
 import { useAuth } from '@/contexts/AuthContext';
-import { Block, BlockType, Booking, BookingStatus, Club, Field, FieldType, FieldUnit, PaymentMethod, PhysicalSlotId, PricingRule, User } from '@/types';
+import { Block, BlockType, Booking, BookingStatus, Club, ClubImage, Field, FieldType, FieldUnit, PaymentMethod, PhysicalSlotId, PricingRule, User } from '@/types';
 import { VenueConfig } from '@/types/courtConfig';
 import type { Database } from '@/lib/supabase-types';
 import { createDefaultVenueConfig } from '@/lib/courtConfig';
 
 const CANCELLATION_POLICY_HOURS = 24;
 const PROOF_BUCKET = 'booking-proofs';
+const CLUB_IMAGE_BUCKET = 'club-images';
 
 interface CreateBookingInput {
   user_id: string;
@@ -34,12 +35,19 @@ interface CreateBookingInput {
 interface CreateBlockInput {
   field_id: string;
   field_unit_ids: string[];
+  /** Día de inicio del bloqueo. Si `date_end` es igual o nulo, es un bloqueo de un solo día. */
   date: string;
+  /** Día de fin del rango (inclusivo). Si difiere de `date`, se crea un bloqueo por cada día con un mismo `block_batch_id`. */
+  date_end?: string;
   start_time: string;
   end_time: string;
   type: BlockType;
   reason: string;
 }
+
+export type CreateBlockResult =
+  | { ok: true; daysCreated: number; batchId: string | null }
+  | { ok: false; message: string };
 
 interface CreateClubInput {
   name: string;
@@ -56,6 +64,9 @@ interface UpdateClubInput {
   open_time?: string;
   close_time?: string;
   is_active?: boolean;
+  phone?: string | null;
+  email?: string | null;
+  amenities?: string[];
 }
 
 interface CreateFieldInput {
@@ -91,6 +102,31 @@ interface CancellationCheck {
   hoursUntilStart: number;
 }
 
+export type ReplaceProofResult =
+  | { ok: true }
+  | { ok: false; reason: 'not_logged_in' | 'not_found' | 'not_owner' | 'not_pending' | 'upload_failed' | 'update_failed'; message: string };
+
+export type InviteStaffResult =
+  | { ok: true; mode: 'created' | 'upgraded'; userId: string; message: string }
+  | { ok: false; message: string };
+
+export type UploadClubImageResult =
+  | { ok: true; image: ClubImage }
+  | { ok: false; reason: 'not_logged_in' | 'bucket_missing' | 'storage_denied' | 'storage_failed' | 'db_failed'; message: string };
+
+export type DeleteFieldResult =
+  | { ok: true; deletedBookings: number; deletedBlocks: number; message: string }
+  | { ok: false; reason: 'has_future_active_bookings' | 'unknown'; activeBookings?: number; message: string };
+
+interface InviteStaffInput {
+  email: string;
+  password: string;
+  first_name: string;
+  last_name?: string;
+  phone?: string;
+  club_id: string;
+}
+
 interface AppDataContextType {
   clubs: Club[];
   fields: Field[];
@@ -99,22 +135,31 @@ interface AppDataContextType {
   pricingRules: PricingRule[];
   profiles: User[];
   venueConfigs: VenueConfig[];
+  clubImages: ClubImage[];
+  getClubImages: (clubId: string) => ClubImage[];
+  getClubImageUrl: (image: ClubImage) => string;
+  uploadClubImage: (clubId: string, file: File, caption?: string) => Promise<UploadClubImageResult>;
+  deleteClubImage: (imageId: string) => Promise<boolean>;
+  inviteStaff: (payload: InviteStaffInput) => Promise<InviteStaffResult>;
+  setStaffActive: (profileId: string, active: boolean) => Promise<boolean>;
+  removeStaff: (profileId: string) => Promise<boolean>;
   createBooking: (payload: CreateBookingInput) => Promise<Booking | null>;
   cancelBooking: (bookingId: string, reason?: string) => Promise<boolean>;
   updateBookingStatus: (bookingId: string, status: BookingStatus) => Promise<void>;
   confirmBooking: (bookingId: string) => Promise<boolean>;
   rejectBooking: (bookingId: string, reason: string) => Promise<boolean>;
-  replacePaymentProof: (bookingId: string, file: File) => Promise<boolean>;
+  replacePaymentProof: (bookingId: string, file: File) => Promise<ReplaceProofResult>;
   evaluateCancellation: (bookingId: string) => CancellationCheck | null;
   markBookingSeen: (bookingId: string) => Promise<void>;
-  createBlock: (payload: CreateBlockInput) => Promise<Block | null>;
+  createBlock: (payload: CreateBlockInput) => Promise<CreateBlockResult>;
   deleteBlock: (blockId: string) => Promise<void>;
+  deleteBlockBatch: (batchId: string) => Promise<boolean>;
   createClub: (payload: CreateClubInput) => Promise<Club | null>;
   updateClub: (payload: UpdateClubInput) => Promise<boolean>;
   deleteClub: (clubId: string) => Promise<boolean>;
   createField: (payload: CreateFieldInput) => Promise<Field | null>;
   updateField: (payload: UpdateFieldInput) => Promise<boolean>;
-  deleteField: (fieldId: string) => Promise<boolean>;
+  deleteField: (fieldId: string) => Promise<DeleteFieldResult>;
   updatePricingRule: (payload: UpdatePricingRuleInput) => Promise<boolean>;
   getVenueConfig: (clubId: string) => VenueConfig;
   updateVenueConfig: (config: VenueConfig) => Promise<boolean>;
@@ -156,9 +201,9 @@ function buildFieldUnits(fieldId: string, layout: CreateFieldInput['layout']): F
 
   if (layout === 'three_7') {
     return [
-      createUnit(fieldId, 'F7', 'F7_1', ['S1', 'S2']),
-      createUnit(fieldId, 'F7', 'F7_2', ['S3', 'S4']),
-      createUnit(fieldId, 'F7', 'F7_3', ['S5', 'S6']),
+      createUnit(fieldId, 'F7', 'F7_1', ['S1', 'S4']),
+      createUnit(fieldId, 'F7', 'F7_2', ['S2', 'S5']),
+      createUnit(fieldId, 'F7', 'F7_3', ['S3', 'S6']),
     ];
   }
 
@@ -168,9 +213,9 @@ function buildFieldUnits(fieldId: string, layout: CreateFieldInput['layout']): F
 
   return [
     createUnit(fieldId, 'F11', 'F11', ['S1', 'S2', 'S3', 'S4', 'S5', 'S6']),
-    createUnit(fieldId, 'F7', 'F7_1', ['S1', 'S2']),
-    createUnit(fieldId, 'F7', 'F7_2', ['S3', 'S4']),
-    createUnit(fieldId, 'F7', 'F7_3', ['S5', 'S6']),
+    createUnit(fieldId, 'F7', 'F7_1', ['S1', 'S4']),
+    createUnit(fieldId, 'F7', 'F7_2', ['S2', 'S5']),
+    createUnit(fieldId, 'F7', 'F7_3', ['S3', 'S6']),
     createUnit(fieldId, 'F5', 'C1', ['S1']),
     createUnit(fieldId, 'F5', 'C2', ['S2']),
     createUnit(fieldId, 'F5', 'C3', ['S3']),
@@ -189,13 +234,14 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [pricingRules, setPricingRules] = useState<PricingRule[]>([]);
   const [profiles, setProfiles] = useState<User[]>([]);
   const [venueConfigs, setVenueConfigs] = useState<VenueConfig[]>([]);
+  const [clubImages, setClubImages] = useState<ClubImage[]>([]);
   const [loading, setLoading] = useState(true);
 
   const reload = async () => {
     setLoading(true);
 
-    const [profilesRes, clubsRes, pricingRes, fieldsRes, unitsRes, bookingsRes, blocksRes, blockUnitsRes, venueConfigsRes] = await Promise.all([
-      supabase.from('profiles').select('id, email, first_name, last_name, phone, national_id, role'),
+    const [profilesRes, clubsRes, pricingRes, fieldsRes, unitsRes, bookingsRes, blocksRes, blockUnitsRes, venueConfigsRes, clubImagesRes] = await Promise.all([
+      supabase.from('profiles').select('id, email, first_name, last_name, phone, national_id, role, staff_club_id, is_active'),
       supabase.from('clubs').select('*').order('created_at', { ascending: false }),
       supabase.from('pricing_rules').select('*'),
       supabase.from('fields').select('*').order('created_at', { ascending: false }),
@@ -204,17 +250,23 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       supabase.from('blocks').select('*').order('date', { ascending: true }),
       supabase.from('block_units').select('*'),
       supabase.from('venue_configs').select('*'),
+      supabase.from('club_images').select('*').order('position', { ascending: true }),
     ]);
 
-    const profilesData: User[] = (profilesRes.data ?? []).map((item) => ({
-      id: item.id,
-      email: item.email,
-      first_name: item.first_name,
-      last_name: item.last_name,
-      phone: item.phone,
-      national_id: item.national_id,
-      role: item.role,
-    }));
+    const profilesData: User[] = (profilesRes.data ?? []).map((item) => {
+      const extras = item as typeof item & { staff_club_id?: string | null; is_active?: boolean };
+      return {
+        id: item.id,
+        email: item.email,
+        first_name: item.first_name,
+        last_name: item.last_name,
+        phone: item.phone,
+        national_id: item.national_id,
+        role: item.role,
+        staff_club_id: extras.staff_club_id ?? null,
+        is_active: extras.is_active ?? true,
+      };
+    });
 
     const pricingData: PricingRule[] = (pricingRes.data ?? []).map((item) => ({
       id: item.id,
@@ -226,19 +278,25 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       is_active: item.is_active,
     }));
 
-    const clubsData: Club[] = (clubsRes.data ?? []).map((item) => ({
-      id: item.id,
-      name: item.name,
-      location: item.location,
-      description: item.description,
-      image: item.image_url ?? '',
-      owner_id: item.owner_id,
-      rating: Number(item.rating ?? 5),
-      price_per_hour: 0,
-      open_time: item.open_time,
-      close_time: item.close_time,
-      is_active: item.is_active,
-    }));
+    const clubsData: Club[] = (clubsRes.data ?? []).map((item) => {
+      const extras = item as typeof item & { phone?: string | null; email?: string | null; amenities?: string[] | null };
+      return {
+        id: item.id,
+        name: item.name,
+        location: item.location,
+        description: item.description,
+        image: item.image_url ?? '',
+        owner_id: item.owner_id,
+        rating: Number(item.rating ?? 5),
+        price_per_hour: 0,
+        open_time: item.open_time,
+        close_time: item.close_time,
+        is_active: item.is_active,
+        phone: extras.phone ?? null,
+        email: extras.email ?? null,
+        amenities: Array.isArray(extras.amenities) ? extras.amenities : [],
+      };
+    });
 
     const unitsByField = new Map<string, FieldUnit[]>();
     for (const item of unitsRes.data ?? []) {
@@ -272,16 +330,20 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       blockUnitMap.set(item.block_id, current);
     }
 
-    const blocksData: Block[] = (blocksRes.data ?? []).map((item) => ({
-      id: item.id,
-      field_id: item.field_id,
-      field_unit_ids: blockUnitMap.get(item.id) ?? [],
-      date: item.date,
-      start_time: item.start_time.slice(0, 5),
-      end_time: item.end_time.slice(0, 5),
-      type: item.type,
-      reason: item.reason,
-    }));
+    const blocksData: Block[] = (blocksRes.data ?? []).map((item) => {
+      const extras = item as typeof item & { block_batch_id?: string | null };
+      return {
+        id: item.id,
+        field_id: item.field_id,
+        field_unit_ids: blockUnitMap.get(item.id) ?? [],
+        date: item.date,
+        start_time: item.start_time.slice(0, 5),
+        end_time: item.end_time.slice(0, 5),
+        type: item.type,
+        reason: item.reason,
+        batch_id: extras.block_batch_id ?? null,
+      };
+    });
 
     const bookingsData: Booking[] = (bookingsRes.data ?? []).map((item) => ({
       id: item.id,
@@ -318,6 +380,15 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       };
     });
 
+    const clubImagesData: ClubImage[] = (clubImagesRes.data ?? []).map((item) => ({
+      id: item.id,
+      club_id: item.club_id,
+      storage_path: item.storage_path,
+      caption: item.caption ?? null,
+      position: Number(item.position ?? 0),
+      created_at: item.created_at,
+    }));
+
     setProfiles(profilesData);
     setClubs(clubsData);
     setFields(fieldsData);
@@ -325,6 +396,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setBookings(bookingsData);
     setPricingRules(pricingData);
     setVenueConfigs(venueConfigsData);
+    setClubImages(clubImagesData);
     setLoading(false);
   };
 
@@ -625,17 +697,20 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return true;
   };
 
-  const replacePaymentProof = async (bookingId: string, file: File): Promise<boolean> => {
-    if (!user) return false;
+  const replacePaymentProof = async (bookingId: string, file: File): Promise<ReplaceProofResult> => {
+    if (!user) return { ok: false, reason: 'not_logged_in', message: 'Debes iniciar sesión nuevamente.' };
     const booking = bookings.find((item) => item.id === bookingId);
-    if (!booking) return false;
+    if (!booking) return { ok: false, reason: 'not_found', message: 'No encontramos esa reserva.' };
     if (booking.user_id !== user.id) {
-      console.error('Cannot replace proof for another user\'s booking');
-      return false;
+      return { ok: false, reason: 'not_owner', message: 'No puedes reemplazar comprobantes de reservas de otro usuario.' };
     }
     if (booking.status !== 'pending') {
-      console.error('Proof can only be replaced while booking is pending');
-      return false;
+      const statusLabel = booking.status === 'confirmed' ? 'confirmada' : 'cancelada o rechazada';
+      return {
+        ok: false,
+        reason: 'not_pending',
+        message: `Esta reserva ya está ${statusLabel}; no se puede reemplazar el comprobante. Contacta al club si necesitas cambiarlo.`,
+      };
     }
 
     const ext = file.name.split('.').pop()?.toLowerCase() ?? 'bin';
@@ -648,7 +723,13 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     if (uploadError) {
       console.error('Error uploading replacement proof:', uploadError);
-      return false;
+      return {
+        ok: false,
+        reason: 'upload_failed',
+        message: uploadError.message?.includes('Bucket not found')
+          ? 'El bucket de comprobantes no está configurado. Avisa al administrador.'
+          : `No se pudo subir el archivo: ${uploadError.message ?? 'error desconocido'}.`,
+      };
     }
 
     const oldPath = booking.payment_proof_path;
@@ -658,7 +739,6 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     });
 
     if (rpcError) {
-      // Fallback if migration 004 isn't applied yet.
       const { error: fallbackError } = await supabase
         .from('bookings')
         .update({ payment_proof_path: filePath, admin_seen_at: null })
@@ -666,7 +746,11 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       if (fallbackError) {
         console.error('Error replacing payment proof:', fallbackError);
         await supabase.storage.from(PROOF_BUCKET).remove([filePath]);
-        return false;
+        return {
+          ok: false,
+          reason: 'update_failed',
+          message: `No se pudo actualizar la reserva: ${fallbackError.message ?? rpcError.message ?? 'error desconocido'}.`,
+        };
       }
     }
 
@@ -675,7 +759,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
 
     await reload();
-    return true;
+    return { ok: true };
   };
 
   const updateBookingStatus = async (bookingId: string, status: BookingStatus) => {
@@ -716,51 +800,97 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // ── BLOCKS ─────────────────────────────────────────────────
 
-  const createBlock = async (payload: CreateBlockInput) => {
-    const { data, error } = await supabase
+  const enumerateDates = (start: string, end: string): string[] => {
+    const dates: string[] = [];
+    const startDate = new Date(`${start}T00:00:00`);
+    const endDate = new Date(`${end}T00:00:00`);
+    if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return [start];
+    if (endDate < startDate) return [start];
+    const cursor = new Date(startDate);
+    while (cursor <= endDate) {
+      dates.push(cursor.toISOString().split('T')[0]);
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return dates;
+  };
+
+  const createBlock = async (payload: CreateBlockInput): Promise<CreateBlockResult> => {
+    const dates = enumerateDates(payload.date, payload.date_end ?? payload.date);
+    if (dates.length === 0) {
+      return { ok: false, message: 'Rango de fechas inválido.' };
+    }
+
+    const isRange = dates.length > 1;
+    const batchId = isRange ? crypto.randomUUID() : null;
+
+    const blockRows = dates.map((date) => ({
+      field_id: payload.field_id,
+      date,
+      start_time: payload.start_time,
+      end_time: payload.end_time,
+      type: payload.type,
+      reason: payload.reason,
+      created_by: user?.id ?? null,
+      block_batch_id: batchId,
+    }));
+
+    const { data: insertedBlocks, error } = await supabase
       .from('blocks')
-      .insert({
-        field_id: payload.field_id,
-        date: payload.date,
-        start_time: payload.start_time,
-        end_time: payload.end_time,
-        type: payload.type,
-        reason: payload.reason,
-        created_by: user?.id ?? null,
-      })
-      .select('*')
-      .single();
+      .insert(blockRows)
+      .select('id');
 
-    if (error || !data) return null;
-
-    if (payload.field_unit_ids.length > 0) {
-      const { error: blockUnitsError } = await supabase.from('block_units').insert(
-        payload.field_unit_ids.map((fieldUnitId) => ({
-          block_id: data.id,
-          field_unit_id: fieldUnitId,
-        })),
-      );
-      if (blockUnitsError) {
-        console.error('Error inserting block units:', blockUnitsError);
-        await supabase.from('blocks').delete().eq('id', data.id);
-        return null;
+    if (error || !insertedBlocks) {
+      console.error('Error creating block(s):', error);
+      // Si la columna block_batch_id no existe (migración 008 no aplicada),
+      // intentamos sin ella para no bloquear al usuario en bloqueos de un solo día.
+      if (!isRange && /block_batch_id/.test(error?.message ?? '')) {
+        const fallback = blockRows.map(({ block_batch_id: _ignore, ...rest }) => rest);
+        const retry = await supabase.from('blocks').insert(fallback).select('id');
+        if (retry.error || !retry.data) {
+          return { ok: false, message: retry.error?.message ?? 'No se pudo crear el bloqueo.' };
+        }
+        await insertBlockUnits(retry.data, payload.field_unit_ids);
+        await reload();
+        return { ok: true, daysCreated: dates.length, batchId: null };
       }
+      return { ok: false, message: error?.message ?? 'No se pudo crear el bloqueo.' };
+    }
+
+    const failed = await insertBlockUnits(insertedBlocks, payload.field_unit_ids);
+    if (failed) {
+      // Rollback manual de los bloqueos recién creados.
+      const ids = insertedBlocks.map((b) => b.id);
+      await supabase.from('blocks').delete().in('id', ids);
+      return { ok: false, message: failed };
     }
 
     await reload();
-    return {
-      id: data.id,
-      field_id: data.field_id,
-      field_unit_ids: payload.field_unit_ids,
-      date: data.date,
-      start_time: data.start_time,
-      end_time: data.end_time,
-      type: data.type,
-      reason: data.reason,
-    };
+    return { ok: true, daysCreated: dates.length, batchId };
+  };
+
+  const insertBlockUnits = async (
+    blocksInserted: { id: string }[],
+    fieldUnitIds: string[],
+  ): Promise<string | null> => {
+    if (fieldUnitIds.length === 0) return null;
+    const rows = blocksInserted.flatMap((block) =>
+      fieldUnitIds.map((fieldUnitId) => ({ block_id: block.id, field_unit_id: fieldUnitId })),
+    );
+    const { error } = await supabase.from('block_units').insert(rows);
+    if (error) {
+      console.error('Error inserting block units:', error);
+      return error.message ?? 'No se pudieron asociar las unidades al bloqueo.';
+    }
+    return null;
   };
 
   const deleteBlock = async (blockId: string) => {
+    const block = blocks.find((b) => b.id === blockId);
+    // Si forma parte de un batch, borramos el rango completo.
+    if (block?.batch_id) {
+      await deleteBlockBatch(block.batch_id);
+      return;
+    }
     const { error: unitsError } = await supabase.from('block_units').delete().eq('block_id', blockId);
     if (unitsError) {
       console.error('Error deleting block units:', unitsError);
@@ -772,6 +902,23 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       return;
     }
     await reload();
+  };
+
+  const deleteBlockBatch = async (batchId: string): Promise<boolean> => {
+    const blockIds = blocks.filter((b) => b.batch_id === batchId).map((b) => b.id);
+    if (blockIds.length === 0) return false;
+    const { error: unitsError } = await supabase.from('block_units').delete().in('block_id', blockIds);
+    if (unitsError) {
+      console.error('Error deleting block units (batch):', unitsError);
+      return false;
+    }
+    const { error: blocksError } = await supabase.from('blocks').delete().in('id', blockIds);
+    if (blocksError) {
+      console.error('Error deleting blocks (batch):', blocksError);
+      return false;
+    }
+    await reload();
+    return true;
   };
 
   // ── CLUBS ──────────────────────────────────────────────────
@@ -839,6 +986,173 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       return false;
     }
     await reload();
+    return true;
+  };
+
+  // ── CLUB IMAGES ────────────────────────────────────────────
+
+  const getClubImages = (clubId: string) =>
+    clubImages.filter((img) => img.club_id === clubId).sort((a, b) => a.position - b.position);
+
+  const getClubImageUrl = (image: ClubImage) => {
+    const { data } = supabase.storage.from(CLUB_IMAGE_BUCKET).getPublicUrl(image.storage_path);
+    return data.publicUrl;
+  };
+
+  const uploadClubImage = async (clubId: string, file: File, caption?: string): Promise<UploadClubImageResult> => {
+    if (!user) return { ok: false, reason: 'not_logged_in', message: 'Debes iniciar sesión nuevamente.' };
+    const ext = file.name.split('.').pop()?.toLowerCase() ?? 'jpg';
+    const filePath = `${clubId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from(CLUB_IMAGE_BUCKET)
+      .upload(filePath, file, { upsert: false, contentType: file.type });
+
+    if (uploadError) {
+      console.error('Error uploading club image:', uploadError);
+      const message = uploadError.message ?? 'error desconocido';
+      if (/bucket not found/i.test(message)) {
+        return { ok: false, reason: 'bucket_missing', message: 'El bucket "club-images" no existe. Aplica la migración 005 en Supabase.' };
+      }
+      if (/row[- ]level security|new row violates|not authorized|policy/i.test(message)) {
+        return {
+          ok: false,
+          reason: 'storage_denied',
+          message: 'Permisos de Storage rechazaron la subida. Verifica que seas el dueño del club y que la migración 005 esté aplicada.',
+        };
+      }
+      return { ok: false, reason: 'storage_failed', message: `Error al subir el archivo: ${message}.` };
+    }
+
+    const nextPosition = (clubImages.filter((img) => img.club_id === clubId)
+      .reduce((max, img) => Math.max(max, img.position), -1)) + 1;
+
+    const { data, error } = await supabase
+      .from('club_images')
+      .insert({
+        club_id: clubId,
+        storage_path: filePath,
+        caption: caption ?? null,
+        position: nextPosition,
+        created_by: user.id,
+      })
+      .select('*')
+      .single();
+
+    if (error || !data) {
+      console.error('Error inserting club image row:', error);
+      await supabase.storage.from(CLUB_IMAGE_BUCKET).remove([filePath]);
+      return {
+        ok: false,
+        reason: 'db_failed',
+        message: `No se pudo registrar la imagen en la base de datos: ${error?.message ?? 'error desconocido'}.`,
+      };
+    }
+
+    const inserted: ClubImage = {
+      id: data.id,
+      club_id: data.club_id,
+      storage_path: data.storage_path,
+      caption: data.caption ?? null,
+      position: Number(data.position ?? 0),
+      created_at: data.created_at,
+    };
+    setClubImages((current) => [...current, inserted].sort((a, b) => a.position - b.position));
+    return { ok: true, image: inserted };
+  };
+
+  const deleteClubImage = async (imageId: string): Promise<boolean> => {
+    const image = clubImages.find((img) => img.id === imageId);
+    if (!image) return false;
+    const { error } = await supabase.from('club_images').delete().eq('id', imageId);
+    if (error) {
+      console.error('Error deleting club image row:', error);
+      return false;
+    }
+    await supabase.storage.from(CLUB_IMAGE_BUCKET).remove([image.storage_path]);
+    setClubImages((current) => current.filter((img) => img.id !== imageId));
+    return true;
+  };
+
+  // ── TEAM / STAFF ───────────────────────────────────────────
+
+  const inviteStaff = async (payload: InviteStaffInput): Promise<InviteStaffResult> => {
+    if (!user) return { ok: false, message: 'No hay sesión activa.' };
+    const { data, error } = await supabase.functions.invoke('invite-staff', {
+      body: {
+        email: payload.email.trim().toLowerCase(),
+        password: payload.password,
+        first_name: payload.first_name.trim(),
+        last_name: payload.last_name?.trim() ?? '',
+        phone: payload.phone?.trim() ?? '',
+        club_id: payload.club_id,
+      },
+    });
+
+    // supabase-js convierte cualquier respuesta no-2xx en `error`. El body
+    // real (con nuestro mensaje en español) viene en error.context, que es
+    // un Response. Hay que parsearlo para mostrar el motivo concreto.
+    if (error) {
+      console.error('inviteStaff edge function error:', error);
+      let serverMessage: string | null = null;
+      try {
+        const ctx = (error as unknown as { context?: Response }).context;
+        if (ctx && typeof ctx.json === 'function') {
+          const body = await ctx.json();
+          serverMessage = body?.error ?? body?.details ?? body?.message ?? null;
+        }
+      } catch (parseErr) {
+        console.error('No se pudo parsear el body del error:', parseErr);
+      }
+
+      if (serverMessage) {
+        return { ok: false, message: serverMessage };
+      }
+      if (error.message?.toLowerCase().includes('not found') || error.message?.toLowerCase().includes('failed to send')) {
+        return {
+          ok: false,
+          message: 'La función "invite-staff" no responde. Verifica que esté desplegada (supabase functions deploy invite-staff) y que SUPABASE_SERVICE_ROLE_KEY esté configurada.',
+        };
+      }
+      return { ok: false, message: `No se pudo crear el empleado: ${error.message}` };
+    }
+
+    const result = data as { ok?: boolean; mode?: 'created' | 'upgraded'; user_id?: string; message?: string; error?: string };
+    if (!result?.ok) {
+      return { ok: false, message: result?.error ?? 'No se pudo crear el empleado.' };
+    }
+
+    await reload();
+    return {
+      ok: true,
+      mode: result.mode ?? 'created',
+      userId: result.user_id ?? '',
+      message: result.message ?? 'Empleado creado.',
+    };
+  };
+
+  const setStaffActive = async (profileId: string, active: boolean): Promise<boolean> => {
+    const { error } = await supabase.from('profiles').update({ is_active: active }).eq('id', profileId);
+    if (error) {
+      console.error('Error toggling staff active:', error);
+      return false;
+    }
+    setProfiles((current) => current.map((p) => (p.id === profileId ? { ...p, is_active: active } : p)));
+    return true;
+  };
+
+  const removeStaff = async (profileId: string): Promise<boolean> => {
+    const { error } = await supabase
+      .from('profiles')
+      .update({ role: 'client', staff_club_id: null, is_active: true })
+      .eq('id', profileId);
+    if (error) {
+      console.error('Error removing staff:', error);
+      return false;
+    }
+    setProfiles((current) =>
+      current.map((p) => (p.id === profileId ? { ...p, role: 'client', staff_club_id: null, is_active: true } : p)),
+    );
     return true;
   };
 
@@ -917,14 +1231,113 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return true;
   };
 
-  const deleteField = async (fieldId: string) => {
-    const { error } = await supabase.from('fields').update({ is_active: false }).eq('id', fieldId);
-    if (error) {
-      console.error('Error deactivating field:', error);
-      return false;
+  const deleteField = async (fieldId: string): Promise<DeleteFieldResult> => {
+    const field = fields.find((f) => f.id === fieldId);
+    const unitIds = field?.units.map((u) => u.id) ?? [];
+
+    // 1) Si no hay unidades asociadas, intentamos delete directo.
+    if (unitIds.length === 0) {
+      const { error } = await supabase.from('fields').delete().eq('id', fieldId);
+      if (error) {
+        return { ok: false, reason: 'unknown', message: error.message ?? 'Error al eliminar la cancha.' };
+      }
+      await reload();
+      return { ok: true, deletedBookings: 0, deletedBlocks: 0, message: 'Cancha eliminada permanentemente.' };
     }
+
+    // 2) Comprobar reservas activas a futuro: solo esas bloquean el borrado.
+    const today = new Date().toISOString().split('T')[0];
+    const { data: blockingBookings, error: checkError } = await supabase
+      .from('bookings')
+      .select('id, date, start_time, status')
+      .in('field_unit_id', unitIds)
+      .in('status', ['pending', 'confirmed'])
+      .gte('date', today);
+
+    if (checkError) {
+      console.error('Error verificando reservas activas:', checkError);
+      return { ok: false, reason: 'unknown', message: checkError.message ?? 'No se pudo verificar las reservas asociadas.' };
+    }
+
+    if ((blockingBookings ?? []).length > 0) {
+      const count = blockingBookings!.length;
+      return {
+        ok: false,
+        reason: 'has_future_active_bookings',
+        activeBookings: count,
+        message: `La cancha tiene ${count} reserva${count === 1 ? '' : 's'} pendiente${count === 1 ? '' : 's'} o confirmada${count === 1 ? '' : 's'} a futuro. Cancélala${count === 1 ? '' : 's'} antes de eliminar la cancha.`,
+      };
+    }
+
+    // 3) Limpieza de datos históricos referentes a esta cancha:
+    //    - bookings (canceladas o pasadas) que mantienen el FK RESTRICT
+    //    - blocks asociados al campo (cascade a block_units por FK)
+    const { count: bookingsToDelete } = await supabase
+      .from('bookings')
+      .select('id', { count: 'exact', head: true })
+      .in('field_unit_id', unitIds);
+
+    if ((bookingsToDelete ?? 0) > 0) {
+      const { error: deleteBookingsErr } = await supabase
+        .from('bookings')
+        .delete()
+        .in('field_unit_id', unitIds);
+      if (deleteBookingsErr) {
+        console.error('Error limpiando reservas históricas:', deleteBookingsErr);
+        return {
+          ok: false,
+          reason: 'unknown',
+          message: `No se pudieron limpiar reservas históricas: ${deleteBookingsErr.message}.`,
+        };
+      }
+    }
+
+    const { count: blocksToDelete } = await supabase
+      .from('blocks')
+      .select('id', { count: 'exact', head: true })
+      .eq('field_id', fieldId);
+
+    if ((blocksToDelete ?? 0) > 0) {
+      // block_units cascade automáticamente por FK on delete cascade
+      const { error: deleteBlocksErr } = await supabase
+        .from('blocks')
+        .delete()
+        .eq('field_id', fieldId);
+      if (deleteBlocksErr) {
+        console.error('Error eliminando bloqueos del campo:', deleteBlocksErr);
+        return {
+          ok: false,
+          reason: 'unknown',
+          message: `No se pudieron eliminar los bloqueos asociados: ${deleteBlocksErr.message}.`,
+        };
+      }
+    }
+
+    // 4) Finalmente, borrar la cancha. field_units cascade, conflict graph se recomputa.
+    const { error: deleteFieldErr } = await supabase.from('fields').delete().eq('id', fieldId);
+    if (deleteFieldErr) {
+      console.error('Error eliminando cancha:', deleteFieldErr);
+      return {
+        ok: false,
+        reason: 'unknown',
+        message: deleteFieldErr.message ?? 'Error al eliminar la cancha.',
+      };
+    }
+
     await reload();
-    return true;
+    const cleanedBookings = bookingsToDelete ?? 0;
+    const cleanedBlocks = blocksToDelete ?? 0;
+    const detailParts: string[] = [];
+    if (cleanedBookings > 0) detailParts.push(`${cleanedBookings} reserva${cleanedBookings === 1 ? '' : 's'} histórica${cleanedBookings === 1 ? '' : 's'}`);
+    if (cleanedBlocks > 0) detailParts.push(`${cleanedBlocks} bloqueo${cleanedBlocks === 1 ? '' : 's'}`);
+    const detail = detailParts.length > 0 ? ` También se eliminaron ${detailParts.join(' y ')}.` : '';
+
+    return {
+      ok: true,
+      deletedBookings: cleanedBookings,
+      deletedBlocks: cleanedBlocks,
+      message: `Cancha eliminada permanentemente.${detail}`,
+    };
   };
 
   // ── PRICING RULES ─────────────────────────────────────────
@@ -1002,6 +1415,14 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     pricingRules,
     profiles,
     venueConfigs,
+    clubImages,
+    getClubImages,
+    getClubImageUrl,
+    uploadClubImage,
+    deleteClubImage,
+    inviteStaff,
+    setStaffActive,
+    removeStaff,
     createBooking,
     cancelBooking,
     updateBookingStatus,
@@ -1012,6 +1433,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     markBookingSeen,
     createBlock,
     deleteBlock,
+    deleteBlockBatch,
     createClub,
     updateClub,
     deleteClub,
@@ -1026,7 +1448,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     fieldCount: fields.length,
     loading,
     reload,
-  }), [clubs, fields, bookings, blocks, pricingRules, profiles, venueConfigs, loading]);
+  }), [clubs, fields, bookings, blocks, pricingRules, profiles, venueConfigs, clubImages, loading]);
 
   return <AppDataContext.Provider value={value}>{children}</AppDataContext.Provider>;
 };

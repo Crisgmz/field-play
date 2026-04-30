@@ -4,18 +4,33 @@ import { Users } from 'lucide-react';
 interface Props {
   selected: FieldType | null;
   onSelect: (type: FieldType) => void;
+  availableTypes?: FieldType[];
 }
 
 const modes = [
-  { type: 'F5' as FieldType, label: 'Fútbol 5', players: '1 slot', desc: 'Elige 1 espacio físico', colorClass: 'field-badge-5' },
-  { type: 'F7' as FieldType, label: 'Fútbol 7', players: '2 slots', desc: 'Solo columnas válidas', colorClass: 'field-badge-7' },
-  { type: 'F11' as FieldType, label: 'Fútbol 11', players: '6 slots', desc: 'Usa toda la cancha', colorClass: 'field-badge-11' },
+  { type: 'F5' as FieldType, label: 'Fútbol 5', players: '5 vs 5', desc: 'Mini cancha', colorClass: 'field-badge-5' },
+  { type: 'F7' as FieldType, label: 'Fútbol 7', players: '7 vs 7', desc: 'Media cancha', colorClass: 'field-badge-7' },
+  { type: 'F11' as FieldType, label: 'Fútbol 11', players: '11 vs 11', desc: 'Cancha completa', colorClass: 'field-badge-11' },
 ];
 
-export default function FieldModeSelector({ selected, onSelect }: Props) {
+export default function FieldModeSelector({ selected, onSelect, availableTypes }: Props) {
+  const visibleModes = availableTypes
+    ? modes.filter((mode) => availableTypes.includes(mode.type))
+    : modes;
+
+  if (visibleModes.length === 0) {
+    return (
+      <p className="rounded-xl border border-dashed border-border bg-muted/30 p-4 text-sm text-muted-foreground">
+        Esta cancha aún no tiene modalidades configuradas.
+      </p>
+    );
+  }
+
+  const cols = visibleModes.length === 1 ? 'sm:grid-cols-1' : visibleModes.length === 2 ? 'sm:grid-cols-2' : 'sm:grid-cols-3';
+
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-      {modes.map((mode) => {
+    <div className={`grid grid-cols-1 gap-3 ${cols}`}>
+      {visibleModes.map((mode) => {
         const isSelected = selected === mode.type;
         return (
           <button
