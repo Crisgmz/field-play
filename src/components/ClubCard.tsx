@@ -36,13 +36,28 @@ function formatNextAvailability(date: string, today: string): string {
 
 export default function ClubCard({ club, preselectedType }: Props) {
   const navigate = useNavigate();
-  const { pricingRules, fields, bookings, blocks, profiles, getVenueConfig } = useAppData();
+  const {
+    pricingRules,
+    fields,
+    bookings,
+    blocks,
+    profiles,
+    getVenueConfig,
+    getClubImages,
+    getClubImageUrl,
+  } = useAppData();
   const [favorited, setFavorited] = useState(false);
 
   const clubRules = pricingRules.filter((r) => r.club_id === club.id && r.is_active);
   const minPrice = clubRules.length > 0 ? Math.min(...clubRules.map((r) => r.price_per_hour)) : 0;
   const owner = profiles.find((p) => p.id === club.owner_id) ?? null;
   const isFeatured = club.rating >= 4.5;
+
+  // Imagen principal: la primera de la galería del club. Si no hay,
+  // caemos al campo legacy `image_url` (para clubes que aún no migraron),
+  // y si tampoco, mostramos un gradiente con el icono ⚽.
+  const galleryImages = getClubImages(club.id);
+  const heroImage = galleryImages[0] ? getClubImageUrl(galleryImages[0]) : club.image || '';
 
   const nextAvailabilityLabel = useMemo(() => {
     const clubFields = fields.filter((f) => f.club_id === club.id && f.is_active !== false);
@@ -83,12 +98,12 @@ export default function ClubCard({ club, preselectedType }: Props) {
     <article className="group flex flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md">
       <div
         className="relative aspect-[16/10] w-full"
-        style={{ background: club.image ? undefined : pickGradient(club.id) }}
+        style={{ background: heroImage ? undefined : pickGradient(club.id) }}
       >
-        {club.image && (
-          <img src={club.image} alt={club.name} className="h-full w-full object-cover" loading="lazy" />
+        {heroImage && (
+          <img src={heroImage} alt={club.name} className="h-full w-full object-cover" loading="lazy" />
         )}
-        {!club.image && (
+        {!heroImage && (
           <div className="flex h-full w-full items-center justify-center text-5xl text-white/90">⚽</div>
         )}
 
