@@ -29,12 +29,18 @@ export default function Login() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Si Register nos navegó aquí tras verificar, prellena el email para login.
+  // Si llegamos aquí después de verificar email o resetear contraseña,
+  // prellena el campo y muestra confirmación. Limpiamos el state para
+  // que un refresh no vuelva a disparar el toast.
   useEffect(() => {
-    const state = location.state as { justVerifiedEmail?: string } | null;
+    const state = location.state as { justVerifiedEmail?: string; passwordReset?: boolean } | null;
     if (state?.justVerifiedEmail) {
       setEmail(state.justVerifiedEmail);
       toast.success('Cuenta verificada. Inicia sesión para continuar.');
+      window.history.replaceState({}, document.title);
+    }
+    if (state?.passwordReset) {
+      toast.success('Contraseña actualizada. Inicia sesión con tu nueva contraseña.');
       window.history.replaceState({}, document.title);
     }
   }, [location.state]);
@@ -200,6 +206,11 @@ export default function Login() {
                     >
                       {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
+                  </div>
+                  <div className="text-right">
+                    <Link to="/forgot-password" className="text-xs font-medium text-primary hover:underline">
+                      ¿Olvidaste tu contraseña?
+                    </Link>
                   </div>
                 </div>
                 <Button type="submit" className="w-full" disabled={submitting}>

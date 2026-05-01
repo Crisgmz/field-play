@@ -30,6 +30,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { useDialogBackButton } from '@/hooks/useDialogBackButton';
 
 const clientNav = [
   { label: 'Inicio', icon: Home, path: '/' },
@@ -66,6 +67,10 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const [logoutDialogOpen, setLogoutDialogOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
 
+  // Back button del navegador cierra el sheet/dialog antes que navegar.
+  useDialogBackButton(sheetOpen, () => setSheetOpen(false));
+  useDialogBackButton(logoutDialogOpen, () => setLogoutDialogOpen(false));
+
   const handleConfirmLogout = async () => {
     setLoggingOut(true);
     try {
@@ -86,64 +91,70 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   if (!user) return <>{children}</>;
 
   const NavContent = () => (
-    <nav className="flex h-full flex-col gap-1 p-4">
-      <div className="mb-6 rounded-2xl bg-primary p-4 text-primary-foreground shadow-lg">
+    <nav className="flex h-full flex-col p-4">
+      {/* Brand: fija arriba */}
+      <div className="mb-4 shrink-0 rounded-2xl bg-primary p-4 text-primary-foreground shadow-lg">
         <div className="mb-3 flex items-center gap-3">
           <div className="flex h-11 w-11 items-center justify-center rounded-full bg-white/15 text-lg font-bold">
             FP
           </div>
-          <div>
+          <div className="min-w-0 flex-1">
             <p className="font-heading text-base font-bold">RealPlay</p>
-            <p className="text-xs text-primary-foreground/80">{getDisplayName(user)}</p>
+            <p className="truncate text-xs text-primary-foreground/80">{getDisplayName(user)}</p>
           </div>
         </div>
-        <div className="flex items-center justify-between text-xs text-primary-foreground/80">
-          <span>{user.email}</span>
+        <div className="flex items-center justify-between gap-2 text-xs text-primary-foreground/80">
+          <span className="truncate">{user.email}</span>
           {isAdmin && (
-            <span className="rounded-full bg-white/15 px-2 py-1 font-semibold text-white">
+            <span className="flex-shrink-0 rounded-full bg-white/15 px-2 py-1 font-semibold text-white">
               <Shield className="mr-1 inline h-3 w-3" />Admin
             </span>
           )}
           {isStaff && (
-            <span className="rounded-full bg-white/15 px-2 py-1 font-semibold text-white">
+            <span className="flex-shrink-0 rounded-full bg-white/15 px-2 py-1 font-semibold text-white">
               <UsersRound className="mr-1 inline h-3 w-3" />Empleado
             </span>
           )}
         </div>
       </div>
 
-      <div className="mb-2 px-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+      <div className="mb-2 shrink-0 px-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
         {isAdminLevel ? 'Panel lateral' : 'Navegación'}
       </div>
 
-      {navItems.map((item) => {
-        const active = location.pathname === item.path;
-        return (
-          <button
-            key={item.path}
-            onClick={() => {
-              navigate(item.path);
-              setSheetOpen(false);
-            }}
-            className={`flex items-center gap-3 rounded-2xl px-3 py-3 text-sm font-medium transition-all ${
-              active
-                ? 'bg-primary text-primary-foreground shadow'
-                : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
-            }`}
-          >
-            <span className={`flex h-9 w-9 items-center justify-center rounded-xl ${
-              active ? 'bg-white/15' : 'bg-muted'
-            }`}>
-              <item.icon className="h-4.5 w-4.5" />
-            </span>
-            <span className="flex-1 text-left">{item.label}</span>
-          </button>
-        );
-      })}
+      {/* Lista scrollable: ocupa todo el espacio sobrante. En mobile (Sheet) o
+          en desktop con muchas secciones, este es el único bloque que scrollea. */}
+      <div className="-mx-1 flex-1 space-y-1 overflow-y-auto px-1">
+        {navItems.map((item) => {
+          const active = location.pathname === item.path;
+          return (
+            <button
+              key={item.path}
+              onClick={() => {
+                navigate(item.path);
+                setSheetOpen(false);
+              }}
+              className={`flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-sm font-medium transition-all ${
+                active
+                  ? 'bg-primary text-primary-foreground shadow'
+                  : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+              }`}
+            >
+              <span className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl ${
+                active ? 'bg-white/15' : 'bg-muted'
+              }`}>
+                <item.icon className="h-4.5 w-4.5" />
+              </span>
+              <span className="flex-1 text-left">{item.label}</span>
+            </button>
+          );
+        })}
+      </div>
 
+      {/* Logout: siempre visible al fondo */}
       <button
         onClick={() => setLogoutDialogOpen(true)}
-        className="mt-auto flex items-center gap-3 rounded-2xl px-3 py-3 text-sm font-medium text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+        className="mt-3 flex shrink-0 items-center gap-3 rounded-2xl px-3 py-3 text-sm font-medium text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
       >
         <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-muted">
           <LogOut className="h-4.5 w-4.5" />

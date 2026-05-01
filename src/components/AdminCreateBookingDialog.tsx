@@ -15,6 +15,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAppData } from '@/contexts/AppDataContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { useDialogBackButton } from '@/hooks/useDialogBackButton';
 import { findAvailableUnit, getUnitsByType } from '@/lib/availability';
 import { TIME_SLOTS } from '@/data/mockData';
 import { FieldType, PaymentMethod } from '@/types';
@@ -52,6 +53,8 @@ export default function AdminCreateBookingDialog() {
   const { clubs, fields, profiles, pricingRules, bookings, blocks, createBooking } = useAppData();
   const [open, setOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  useDialogBackButton(open, () => setOpen(false));
 
   const ownedClubs = useMemo(() => {
     if (isStaff && staffClubId) return clubs.filter((c) => c.id === staffClubId);
@@ -256,7 +259,7 @@ export default function AdminCreateBookingDialog() {
           Crear reserva manual
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Nueva reserva manual</DialogTitle>
           <DialogDescription>

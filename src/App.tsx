@@ -8,6 +8,8 @@ import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import AppLayout from "@/components/AppLayout";
 import Login from "@/pages/Login";
 import Register from "@/pages/Register";
+import ForgotPassword from "@/pages/ForgotPassword";
+import ResetPassword from "@/pages/ResetPassword";
 import Home from "@/pages/Home";
 import BookingFlow from "@/pages/BookingFlow";
 import MyBookings from "@/pages/MyBookings";
@@ -73,6 +75,10 @@ function AppRoutes() {
     <Routes>
       <Route path="/login" element={user ? <Navigate to={authenticatedHome} replace /> : <Login />} />
       <Route path="/register" element={user ? <Navigate to={authenticatedHome} replace /> : <Register />} />
+      {/* Recovery flow: ambas rutas son siempre públicas. /reset-password
+          maneja su propia sesión vía el hash de la URL (Supabase recovery). */}
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/" element={<ProtectedRoute><Home /></ProtectedRoute>} />
       <Route path="/clubs/:clubId" element={<ProtectedRoute><BookingFlow /></ProtectedRoute>} />
       <Route path="/clubs/:clubId/book" element={<ProtectedRoute><BookingFlow /></ProtectedRoute>} />

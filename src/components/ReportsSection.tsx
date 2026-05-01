@@ -12,10 +12,18 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { CalendarRange, DollarSign, MinusCircle, Percent, TrendingUp, Users } from 'lucide-react';
+import { CalendarRange, DollarSign, Download, FileSpreadsheet, FileText, MinusCircle, Percent, TrendingUp, Users } from 'lucide-react';
+import { toast } from 'sonner';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { useAppData } from '@/contexts/AppDataContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { formatCurrency } from '@/lib/bookingFormat';
@@ -137,6 +145,45 @@ export default function ReportsSection() {
     return `${fmt(start)} – ${fmt(end)}`;
   };
 
+  const buildExportPayload = () => {
+    const clubLabel =
+      clubId === 'all'
+        ? `Todos los clubes (${ownedClubs.length})`
+        : ownedClubs.find((c) => c.id === clubId)?.name ?? 'Club';
+    return {
+      clubName: clubLabel,
+      range,
+      kpis,
+      dailyRevenue,
+      modalityBreakdown,
+      weekdayBreakdown,
+      hourBreakdown,
+      topClients,
+      blockBreakdown,
+    };
+  };
+
+  const handleExport = async (format: 'excel' | 'pdf') => {
+    const loadingToast = toast.loading(`Generando ${format === 'excel' ? 'Excel' : 'PDF'}...`);
+    try {
+      // Dynamic import: xlsx (~430KB) y jspdf+html2canvas (~600KB) solo se
+      // descargan cuando el usuario realmente exporta. Mantiene liviano el
+      // bundle inicial de la app.
+      const { exportToExcel, exportToPDF } = await import('@/lib/reportExport');
+      const payload = buildExportPayload();
+      if (format === 'excel') {
+        exportToExcel(payload);
+        toast.success('Reporte exportado a Excel.', { id: loadingToast });
+      } else {
+        exportToPDF(payload);
+        toast.success('Reporte exportado a PDF.', { id: loadingToast });
+      }
+    } catch (err) {
+      console.error('Error al exportar reporte:', err);
+      toast.error('No se pudo generar el archivo. Intenta de nuevo.', { id: loadingToast });
+    }
+  };
+
   if (loading && bookings.length === 0) {
     return (
       <div className="space-y-6">
@@ -202,9 +249,35 @@ export default function ReportsSection() {
           </>
         )}
 
-        <div className="ml-auto flex items-center gap-2 text-sm text-muted-foreground">
-          <CalendarRange className="h-4 w-4" />
-          {formatRangeLabel()}
+        <div className="ml-auto flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <CalendarRange className="h-4 w-4" />
+            {formatRangeLabel()}
+          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="sm" variant="default">
+                <Download className="mr-2 h-4 w-4" />
+                Exportar
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52">
+              <DropdownMenuItem onSelect={() => handleExport('excel')} className="cursor-pointer">
+                <FileSpreadsheet className="mr-2 h-4 w-4 text-emerald-600" />
+                <div className="flex flex-col">
+                  <span className="font-medium">Excel (.xlsx)</span>
+                  <span className="text-[11px] text-muted-foreground">Datos en hojas separadas</span>
+                </div>
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => handleExport('pdf')} className="cursor-pointer">
+                <FileText className="mr-2 h-4 w-4 text-rose-600" />
+                <div className="flex flex-col">
+                  <span className="font-medium">PDF</span>
+                  <span className="text-[11px] text-muted-foreground">Resumen ejecutivo imprimible</span>
+                </div>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 

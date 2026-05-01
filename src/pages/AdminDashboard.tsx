@@ -40,6 +40,7 @@ import ReportsSection from '@/components/ReportsSection';
 import AdminCreateBookingDialog from '@/components/AdminCreateBookingDialog';
 import { formatBlockType, formatBookingDate, formatBookingStatus, formatCurrency, getStatusTone } from '@/lib/bookingFormat';
 import { KpiRowSkeleton, TableRowSkeleton } from '@/components/skeletons';
+import { useDialogBackButton } from '@/hooks/useDialogBackButton';
 import { Settings } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
@@ -66,7 +67,7 @@ const layoutDescriptions: Record<keyof typeof layoutLabels, string> = {
 
 export default function AdminDashboard() {
   const { section } = useParams();
-  const { user, isStaff, canManageTeam } = useAuth();
+  const { user, isStaff, canManageTeam, canManageClubInfo } = useAuth();
   const navigate = useNavigate();
   const {
     clubs,
@@ -104,6 +105,9 @@ export default function AdminDashboard() {
     }
   }, [isStaff, currentSection, navigate]);
 
+  // Back button del navegador / gesto en mobile cierra el modal en lugar de
+  // hacer navigate-back que sacaría al admin de la sección actual.
+
   const [calendarDate, setCalendarDate] = useState(new Date().toISOString().split('T')[0]);
   const [selectedMobileCalendarDate, setSelectedMobileCalendarDate] = useState<string | null>(null);
   const [blockDialogOpen, setBlockDialogOpen] = useState(false);
@@ -118,6 +122,16 @@ export default function AdminDashboard() {
   const [bookingActionMode, setBookingActionMode] = useState<'idle' | 'reject' | 'cancel-confirmed'>('idle');
   const [bookingActionReason, setBookingActionReason] = useState('');
   const [bookingActionBusy, setBookingActionBusy] = useState(false);
+
+  // Conectamos los modales más críticos del admin con el back button del
+  // navegador. Esto fixea el caso "abro modal de reserva, presiono atrás
+  // y se va a otra sección" — ahora el back solo cierra el modal.
+  useDialogBackButton(Boolean(selectedBookingId), () => setSelectedBookingId(null));
+  useDialogBackButton(blockDialogOpen, () => setBlockDialogOpen(false));
+  useDialogBackButton(clubDialogOpen, () => setClubDialogOpen(false));
+  useDialogBackButton(fieldDialogOpen, () => setFieldDialogOpen(false));
+  useDialogBackButton(Boolean(deleteFieldTarget), () => setDeleteFieldTarget(null));
+  useDialogBackButton(Boolean(deleteBlockTarget), () => setDeleteBlockTarget(null));
 
   // Edit states
   const [editingClubId, setEditingClubId] = useState<string | null>(null);
@@ -175,14 +189,100 @@ export default function AdminDashboard() {
   const unseenBookings = bookings.filter((b) => !b.admin_seen_at && b.status === 'pending');
   const unseenCount = unseenBookings.length;
 
-  const stats = [
-    { label: 'Reservas confirmadas', value: bookings.filter((b) => b.status === 'confirmed').length, icon: Calendar },
-    { label: 'Pendientes nuevas', value: unseenCount, icon: BellRing, highlight: unseenCount > 0 },
-    { label: 'Bloqueos activos', value: blocks.length, icon: Shield },
-    { label: 'Clubes', value: clubs.length, icon: Building2 },
-    { label: 'Ingresos estimados', value: `RD$ ${totalRevenue.toLocaleString()}`, icon: DollarSign },
-    { label: 'Usuarios activos', value: activeUsers, icon: Users },
+  // Cada card tiene su propia paleta + un destino de navegación. Al
+  // hacer click, el admin va a la sección relevante.
+  const stats: Array<{
+    label: string;
+    value: number | string;
+    icon: typeof Calendar;
+    accent: 'emerald' | 'amber' | 'rose' | 'sky' | 'primary' | 'violet';
+    path?: string;
+    highlight?: boolean;
+  }> = [
+    {
+      label: 'Reservas confirmadas',
+      value: bookings.filter((b) => b.status === 'confirmed').length,
+      icon: Calendar,
+      accent: 'emerald',
+      path: '/admin/bookings',
+    },
+    {
+      label: 'Pendientes nuevas',
+      value: unseenCount,
+      icon: BellRing,
+      accent: 'amber',
+      highlight: unseenCount > 0,
+      path: '/admin/bookings',
+    },
+    {
+      label: 'Bloqueos activos',
+      value: blocks.length,
+      icon: Shield,
+      accent: 'rose',
+      path: '/admin/blocks',
+    },
+    {
+      label: 'Clubes',
+      value: clubs.length,
+      icon: Building2,
+      accent: 'primary',
+      path: canManageClubInfo ? '/admin/clubs' : undefined,
+    },
+    {
+      label: 'Ingresos estimados',
+      value: `RD$ ${totalRevenue.toLocaleString()}`,
+      icon: DollarSign,
+      accent: 'sky',
+      path: !isStaff ? '/admin/reports' : undefined,
+    },
+    {
+      // Solo informativa: cuenta clientes únicos con reservas. No tiene
+      // navegación porque no hay vista dedicada de "lista de usuarios".
+      label: 'Usuarios activos',
+      value: activeUsers,
+      icon: Users,
+      accent: 'violet',
+    },
   ];
+
+  // Colores sólidos saturados con texto blanco para máximo contraste
+  // visual. Tailwind requiere classes literales para incluirlas al bundle.
+  const accentClasses: Record<typeof stats[number]['accent'], {
+    cardBg: string; cardBorder: string;
+    iconBg: string; iconText: string;
+    label: string; value: string;
+  }> = {
+    emerald: {
+      cardBg: 'bg-emerald-600', cardBorder: 'border-emerald-700',
+      iconBg: 'bg-white/20', iconText: 'text-white',
+      label: 'text-white/85', value: 'text-white',
+    },
+    amber: {
+      cardBg: 'bg-amber-500', cardBorder: 'border-amber-600',
+      iconBg: 'bg-white/25', iconText: 'text-white',
+      label: 'text-white/90', value: 'text-white',
+    },
+    rose: {
+      cardBg: 'bg-rose-500', cardBorder: 'border-rose-600',
+      iconBg: 'bg-white/20', iconText: 'text-white',
+      label: 'text-white/85', value: 'text-white',
+    },
+    sky: {
+      cardBg: 'bg-sky-600', cardBorder: 'border-sky-700',
+      iconBg: 'bg-white/20', iconText: 'text-white',
+      label: 'text-white/85', value: 'text-white',
+    },
+    primary: {
+      cardBg: 'bg-primary', cardBorder: 'border-primary',
+      iconBg: 'bg-white/20', iconText: 'text-white',
+      label: 'text-primary-foreground/85', value: 'text-primary-foreground',
+    },
+    violet: {
+      cardBg: 'bg-violet-600', cardBorder: 'border-violet-700',
+      iconBg: 'bg-white/20', iconText: 'text-white',
+      label: 'text-white/85', value: 'text-white',
+    },
+  };
 
   const calendarDateObj = new Date(`${calendarDate}T00:00:00`);
   const weekDates = Array.from({ length: 7 }, (_, i) => {
@@ -544,17 +644,63 @@ export default function AdminDashboard() {
         return (
           <div className="animate-fade-in space-y-8">
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-              {stats.map((stat) => (
-                <div key={stat.label} className={`rounded-2xl border p-5 shadow-sm ${
-                  stat.highlight ? 'border-amber-300 bg-amber-50 animate-pulse' : 'border-border bg-card'
-                }`}>
-                  <div className="flex items-center justify-between">
-                    <span className={`text-xs font-medium ${stat.highlight ? 'text-amber-700' : 'text-muted-foreground'}`}>{stat.label}</span>
-                    <stat.icon className={`h-4 w-4 ${stat.highlight ? 'text-amber-600' : 'text-primary'}`} />
+              {stats.map((stat) => {
+                const palette = accentClasses[stat.accent];
+                const isInteractive = Boolean(stat.path);
+                const baseClasses = `relative overflow-hidden rounded-2xl border p-5 shadow-sm transition-all ${palette.cardBg} ${palette.cardBorder} ${
+                  isInteractive ? 'cursor-pointer hover:-translate-y-0.5 hover:shadow-md focus-visible:-translate-y-0.5 focus-visible:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50' : ''
+                } ${stat.highlight ? 'ring-2 ring-amber-400 animate-pulse' : ''}`;
+
+                const innerContent = (
+                  <>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <span className={`text-xs font-medium uppercase tracking-wide ${palette.label}`}>
+                          {stat.label}
+                        </span>
+                        <p className={`mt-2 font-heading text-2xl font-bold ${palette.value}`}>
+                          {stat.value}
+                        </p>
+                      </div>
+                      <span
+                        className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl shadow-sm ${palette.iconBg} ${palette.iconText}`}
+                      >
+                        <stat.icon className="h-5 w-5" />
+                      </span>
+                    </div>
+                    {stat.highlight && (
+                      <p className="mt-3 inline-flex items-center gap-1 rounded-full bg-white/25 px-2 py-0.5 text-[10px] font-bold text-white backdrop-blur-sm">
+                        <BellRing className="h-3 w-3" />
+                        Requiere atención
+                      </p>
+                    )}
+                    {isInteractive && (
+                      <span className={`mt-3 inline-flex items-center gap-1 text-[11px] font-medium ${palette.label}`}>
+                        Ver detalle →
+                      </span>
+                    )}
+                  </>
+                );
+
+                if (isInteractive) {
+                  return (
+                    <button
+                      key={stat.label}
+                      type="button"
+                      onClick={() => stat.path && navigate(stat.path)}
+                      className={`${baseClasses} text-left`}
+                    >
+                      {innerContent}
+                    </button>
+                  );
+                }
+
+                return (
+                  <div key={stat.label} className={baseClasses}>
+                    {innerContent}
                   </div>
-                  <p className={`mt-2 font-heading text-2xl font-bold ${stat.highlight ? 'text-amber-800' : 'text-card-foreground'}`}>{stat.value}</p>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
@@ -1331,7 +1477,7 @@ export default function AdminDashboard() {
               <DialogTrigger asChild>
                 <Button><Plus className="mr-2 h-4 w-4" />Nueva cancha física</Button>
               </DialogTrigger>
-              <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+              <DialogContent className="max-w-lg">
                 <DialogHeader>
                   <DialogTitle>Agregar cancha física</DialogTitle>
                   <DialogDescription>

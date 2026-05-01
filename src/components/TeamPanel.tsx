@@ -23,6 +23,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAppData } from '@/contexts/AppDataContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { useDialogBackButton } from '@/hooks/useDialogBackButton';
 
 export default function TeamPanel() {
   const { user } = useAuth();
@@ -38,6 +39,10 @@ export default function TeamPanel() {
   const [showPassword, setShowPassword] = useState(false);
   const [createdCredentials, setCreatedCredentials] = useState<{ email: string; password: string } | null>(null);
   const [removeTarget, setRemoveTarget] = useState<string | null>(null);
+
+  useDialogBackButton(inviteOpen, () => setInviteOpen(false));
+  useDialogBackButton(Boolean(createdCredentials), () => setCreatedCredentials(null));
+  useDialogBackButton(Boolean(removeTarget), () => setRemoveTarget(null));
   const [form, setForm] = useState({
     email: '',
     first_name: '',
