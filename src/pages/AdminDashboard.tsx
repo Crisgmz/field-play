@@ -37,6 +37,7 @@ import ClubGalleryManager from '@/components/ClubGalleryManager';
 import TeamPanel from '@/components/TeamPanel';
 import AdminWeekCalendar from '@/components/AdminWeekCalendar';
 import ReportsSection from '@/components/ReportsSection';
+import AdminCreateBookingDialog from '@/components/AdminCreateBookingDialog';
 import { formatBlockType, formatBookingDate, formatBookingStatus, formatCurrency, getStatusTone } from '@/lib/bookingFormat';
 import { Settings } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
@@ -672,6 +673,10 @@ export default function AdminDashboard() {
       case 'bookings':
         return (
           <div className="space-y-4">
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <AdminCreateBookingDialog />
+            </div>
+
             {newPendingBookings.length > 0 && (
               <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-900 shadow-sm">
                 <BellRing className="mt-0.5 h-5 w-5 flex-shrink-0" />

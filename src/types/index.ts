@@ -55,7 +55,7 @@ export interface ClubImage {
 
 export type FieldType = 'F11' | 'F7' | 'F5';
 export type PhysicalSlotId = 'S1' | 'S2' | 'S3' | 'S4' | 'S5' | 'S6';
-export type PaymentMethod = 'bank_transfer';
+export type PaymentMethod = 'bank_transfer' | 'cash';
 
 export interface PricingRule {
   id: string;
@@ -106,6 +106,7 @@ export interface Booking {
   admin_seen_at?: string | null;
   notes?: string;
   created_at?: string;
+  created_by_admin?: boolean;
   cancellation_reason?: string | null;
   cancelled_by?: string | null;
   cancelled_at?: string | null;

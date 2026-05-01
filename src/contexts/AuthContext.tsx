@@ -67,14 +67,47 @@ const AuthContext = createContext<AuthContextType>({
 
 const fullName = (user: User) => `${user.first_name} ${user.last_name}`.trim();
 
+// Si Supabase responde muy lento, no queremos colgar el bootstrap.
+// 8s es más que suficiente para una query de un solo profile.
+const PROFILE_QUERY_TIMEOUT_MS = 8000;
+
+// `PromiseLike` cubre tanto Promises nativos como los thenables que
+// devuelven los builders de supabase-js (PostgrestBuilder, etc.).
+function withTimeout<T>(thenable: PromiseLike<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const id = setTimeout(() => reject(new Error(`Timeout (${ms}ms): ${label}`)), ms);
+    thenable.then(
+      (value) => {
+        clearTimeout(id);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(id);
+        reject(err);
+      },
+    );
+  });
+}
+
 async function loadProfile(session: Session | null): Promise<User | null> {
   if (!session?.user) return null;
 
-  const { data, error } = await supabase
+  const query = supabase
     .from('profiles')
     .select('id, email, first_name, last_name, phone, national_id, role, staff_club_id, is_active')
     .eq('id', session.user.id)
     .maybeSingle();
+
+  let data: Awaited<typeof query>['data'];
+  let error: Awaited<typeof query>['error'];
+  try {
+    const result = await withTimeout(query, PROFILE_QUERY_TIMEOUT_MS, 'loadProfile');
+    data = result.data;
+    error = result.error;
+  } catch (err) {
+    console.error('loadProfile timeout/error:', err);
+    return null;
+  }
 
   if (error || !data) {
     return null;
@@ -110,19 +143,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     let mounted = true;
 
+    // Watchdog: si por alguna razón el bootstrap toma más de 10s
+    // (Supabase dormido, fetch que cuelga, etc.) forzamos loading=false
+    // para que el usuario al menos vea la pantalla de login en vez
+    // de un spinner eterno.
+    const watchdogId = window.setTimeout(() => {
+      if (mounted) {
+        console.warn('Auth bootstrap watchdog triggered after 10s. Forzando loading=false.');
+        setLoading(false);
+      }
+    }, 10000);
+
     const bootstrap = async () => {
       try {
-        const { data, error } = await supabase.auth.getSession();
-        if (error) {
-          console.error("Error getting session:", error);
+        const sessionResult = await withTimeout(
+          supabase.auth.getSession(),
+          PROFILE_QUERY_TIMEOUT_MS,
+          'getSession',
+        );
+        if (sessionResult.error) {
+          console.error('Error getting session:', sessionResult.error);
         }
-        const profile = await loadProfile(data?.session || null);
+        const profile = await loadProfile(sessionResult.data?.session ?? null);
         if (!mounted) return;
         setUser(profile);
       } catch (err) {
-        console.error("Bootstrap error:", err);
+        console.error('Bootstrap error:', err);
       } finally {
-        if (mounted) setLoading(false);
+        if (mounted) {
+          window.clearTimeout(watchdogId);
+          setLoading(false);
+        }
       }
     };
 
@@ -134,14 +185,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (!mounted) return;
         setUser(profile);
       } catch (err) {
-        console.error("Auth state change error:", err);
+        console.error('Auth state change error:', err);
       } finally {
-        if (mounted) setLoading(false);
+        if (mounted) {
+          window.clearTimeout(watchdogId);
+          setLoading(false);
+        }
       }
     });
 
     return () => {
       mounted = false;
+      window.clearTimeout(watchdogId);
       listener.subscription.unsubscribe();
     };
   }, []);

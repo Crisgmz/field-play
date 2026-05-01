@@ -30,6 +30,8 @@ interface CreateBookingInput {
   payment_method?: PaymentMethod;
   payment_proof_path?: string | null;
   notes?: string | null;
+  /** True cuando un club_admin/staff crea la reserva manualmente para un cliente. */
+  created_by_admin?: boolean;
 }
 
 interface CreateBlockInput {
@@ -368,6 +370,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       rejected_at: (item as { rejected_at?: string | null }).rejected_at ?? null,
       confirmed_at: (item as { confirmed_at?: string | null }).confirmed_at ?? null,
       proof_replaced_at: (item as { proof_replaced_at?: string | null }).proof_replaced_at ?? null,
+      created_by_admin: Boolean((item as { created_by_admin?: boolean | null }).created_by_admin ?? false),
     }));
 
     const venueConfigsData: VenueConfig[] = (venueConfigsRes.data ?? []).map((item) => {
@@ -436,6 +439,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       p_payment_method: payload.payment_method ?? 'bank_transfer',
       p_payment_proof_path: payload.payment_proof_path ?? null,
       p_notes: payload.notes ?? null,
+      p_created_by_admin: payload.created_by_admin ?? false,
     });
 
     if (!rpcResult.error && rpcResult.data) {
