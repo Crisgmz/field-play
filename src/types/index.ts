@@ -55,7 +55,7 @@ export interface ClubImage {
 
 export type FieldType = 'F11' | 'F7' | 'F5';
 export type PhysicalSlotId = 'S1' | 'S2' | 'S3' | 'S4' | 'S5' | 'S6';
-export type PaymentMethod = 'bank_transfer' | 'cash';
+export type PaymentMethod = 'bank_transfer' | 'cash' | 'card';
 
 export interface PricingRule {
   id: string;

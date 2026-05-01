@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import { PHYSICAL_SLOTS } from '@/data/mockData';
 import { supabase } from '@/lib/supabase';
 import {
@@ -16,6 +17,20 @@ import { createDefaultVenueConfig } from '@/lib/courtConfig';
 const CANCELLATION_POLICY_HOURS = 24;
 const PROOF_BUCKET = 'booking-proofs';
 const CLUB_IMAGE_BUCKET = 'club-images';
+
+interface UpdateBookingInput {
+  bookingId: string;
+  date?: string;
+  start_time?: string;
+  end_time?: string;
+  total_price?: number;
+  payment_method?: PaymentMethod;
+  notes?: string | null;
+}
+
+export type UpdateBookingResult =
+  | { ok: true }
+  | { ok: false; reason: 'not_found' | 'conflict' | 'invalid' | 'db_error'; message: string };
 
 interface CreateBookingInput {
   user_id: string;
@@ -148,6 +163,7 @@ interface AppDataContextType {
   createBooking: (payload: CreateBookingInput) => Promise<Booking | null>;
   cancelBooking: (bookingId: string, reason?: string) => Promise<boolean>;
   updateBookingStatus: (bookingId: string, status: BookingStatus) => Promise<void>;
+  updateBooking: (input: UpdateBookingInput) => Promise<UpdateBookingResult>;
   confirmBooking: (bookingId: string) => Promise<boolean>;
   rejectBooking: (bookingId: string, reason: string) => Promise<boolean>;
   replacePaymentProof: (bookingId: string, file: File) => Promise<ReplaceProofResult>;
@@ -228,7 +244,12 @@ function buildFieldUnits(fieldId: string, layout: CreateFieldInput['layout']): F
 }
 
 export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { user } = useAuth();
+  const { user, isAdmin, isStaff, staffClubId } = useAuth();
+  // Set de booking IDs ya conocidos por el cliente. Cada INSERT de
+  // realtime que NO esté en este set → es realmente nuevo y dispara toast.
+  // Evita doble-toast cuando es nuestra propia inserción que vuelve por
+  // realtime después de reload().
+  const knownBookingIdsRef = useRef<Set<string>>(new Set());
   const [clubs, setClubs] = useState<Club[]>([]);
   const [fields, setFields] = useState<Field[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
@@ -418,6 +439,101 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     reload();
   }, [user?.id]);
+
+  // ── REALTIME ──────────────────────────────────────────────
+  // Suscripción a cambios en las tablas operativas. Cada evento
+  // dispara un reload() debounced: si llegan 5 cambios en 300ms (ej.
+  // un batch), solo recargamos una vez. Eso da feel "en vivo" sin
+  // tirar 9 queries por evento.
+  //
+  // Adicional: si llega una reserva nueva pendiente que el admin/staff
+  // aún no conocía, mostramos un toast "Nueva reserva pendiente". El
+  // ref `knownBookingIdsRef` evita doble-toast cuando es nuestra propia
+  // inserción que vuelve por realtime después del reload del action.
+  //
+  // Requiere migración 013 aplicada. Si no, las suscripciones se
+  // crean pero no reciben eventos (sin error visible).
+  useEffect(() => {
+    if (!user) return;
+
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    const debouncedReload = () => {
+      if (timeout) clearTimeout(timeout);
+      timeout = setTimeout(() => {
+        void reload();
+      }, 300);
+    };
+
+    const handleBookingInsert = (payload: { new?: Record<string, unknown> }) => {
+      const row = payload.new;
+      if (!row || typeof row !== 'object') return;
+      const id = String(row.id ?? '');
+      if (!id) return;
+      // Si ya lo conocemos (fue creado por nosotros y reload lo trajo),
+      // no toasteamos.
+      if (knownBookingIdsRef.current.has(id)) return;
+      knownBookingIdsRef.current.add(id);
+
+      // Solo notificamos a admin/staff. Cliente no necesita toast por
+      // reservas que ni le aplican.
+      if (!isAdmin && !isStaff) return;
+      const status = String(row.status ?? '');
+      if (status !== 'pending') return;
+
+      // Para staff: solo si es de su club asignado.
+      const bookingClubId = String(row.club_id ?? '');
+      if (isStaff && staffClubId && bookingClubId !== staffClubId) return;
+
+      const fieldType = String(row.field_type ?? '');
+      const date = String(row.date ?? '');
+      const startTime = String(row.start_time ?? '').slice(0, 5);
+      toast.info('Nueva reserva pendiente', {
+        description: `${fieldType} · ${date} · ${startTime}`,
+      });
+    };
+
+    const tables = [
+      'bookings',
+      'blocks',
+      'block_units',
+      'fields',
+      'field_units',
+      'clubs',
+      'pricing_rules',
+      'venue_configs',
+      'club_images',
+      'profiles',
+    ];
+
+    let channel = supabase.channel('app-data-realtime');
+    tables.forEach((table) => {
+      channel = channel.on(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        'postgres_changes' as any,
+        { event: '*', schema: 'public', table },
+        (payload: { eventType?: string; new?: Record<string, unknown> }) => {
+          if (table === 'bookings' && payload.eventType === 'INSERT') {
+            handleBookingInsert(payload);
+          }
+          debouncedReload();
+        },
+      );
+    });
+    channel.subscribe();
+
+    return () => {
+      if (timeout) clearTimeout(timeout);
+      void supabase.removeChannel(channel);
+    };
+  }, [user?.id, isAdmin, isStaff, staffClubId]);
+
+  // Mantener `knownBookingIdsRef` sincronizado con los IDs actuales del
+  // state. Así, cuando llegue un INSERT de realtime para una reserva
+  // que YA habíamos cargado vía reload, el set lo identifica y se
+  // omite el toast.
+  useEffect(() => {
+    knownBookingIdsRef.current = new Set(bookings.map((b) => b.id));
+  }, [bookings]);
 
   // ── BOOKINGS ───────────────────────────────────────────────
 
@@ -760,6 +876,107 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     if (oldPath) {
       await supabase.storage.from(PROOF_BUCKET).remove([oldPath]);
+    }
+
+    await reload();
+    return { ok: true };
+  };
+
+  const updateBooking = async (input: UpdateBookingInput): Promise<UpdateBookingResult> => {
+    const booking = bookings.find((b) => b.id === input.bookingId);
+    if (!booking) {
+      return { ok: false, reason: 'not_found', message: 'Reserva no encontrada.' };
+    }
+
+    // Datos finales con los cambios aplicados encima del estado actual.
+    const next = {
+      date: input.date ?? booking.date,
+      start_time: input.start_time ?? booking.start_time,
+      end_time: input.end_time ?? booking.end_time,
+      total_price: input.total_price ?? booking.total_price,
+      payment_method: input.payment_method ?? booking.payment_method ?? 'bank_transfer',
+      notes: input.notes !== undefined ? input.notes : booking.notes ?? null,
+    };
+
+    if (next.end_time <= next.start_time) {
+      return { ok: false, reason: 'invalid', message: 'La hora de fin debe ser posterior a la de inicio.' };
+    }
+    if (next.total_price < 0) {
+      return { ok: false, reason: 'invalid', message: 'El precio no puede ser negativo.' };
+    }
+
+    // Si cambió fecha u hora, validamos que no choque con otra reserva o
+    // bloqueo del mismo field. Excluimos la reserva actual del check.
+    const dateOrTimeChanged =
+      next.date !== booking.date ||
+      next.start_time !== booking.start_time ||
+      next.end_time !== booking.end_time;
+
+    if (dateOrTimeChanged) {
+      const field = fields.find((f) => f.units.some((u) => u.id === booking.field_unit_id));
+      const unit = field?.units.find((u) => u.id === booking.field_unit_id);
+      if (!field || !unit) {
+        return { ok: false, reason: 'not_found', message: 'No se encontró la cancha de esta reserva.' };
+      }
+      const requiredSlots = new Set(unit.slot_ids);
+
+      // Buscar otras reservas (no canceladas, no esta misma) en el mismo
+      // field y fecha que se solapen y compartan slots con la unidad.
+      const otherBookings = bookings.filter(
+        (b) =>
+          b.id !== booking.id &&
+          b.status !== 'cancelled' &&
+          b.date === next.date,
+      );
+      const conflictingBooking = otherBookings.find((b) => {
+        const otherUnit = field.units.find((u) => u.id === b.field_unit_id);
+        if (!otherUnit) return false;
+        const sharesSlot = otherUnit.slot_ids.some((s) => requiredSlots.has(s));
+        if (!sharesSlot) return false;
+        const overlaps = next.start_time < b.end_time && next.end_time > b.start_time;
+        return overlaps;
+      });
+      if (conflictingBooking) {
+        return {
+          ok: false,
+          reason: 'conflict',
+          message: `Choca con la reserva ${conflictingBooking.start_time}–${conflictingBooking.end_time}.`,
+        };
+      }
+
+      // Validamos también contra bloqueos del field en esa fecha que toquen
+      // una unidad que comparte slot.
+      const conflictingBlock = blocks.find((b) => {
+        if (b.field_id !== field.id || b.date !== next.date) return false;
+        const blockedUnits = b.field_unit_ids.map((id) => field.units.find((u) => u.id === id)).filter(Boolean) as typeof field.units;
+        const sharesSlot = blockedUnits.some((bu) => bu.slot_ids.some((s) => requiredSlots.has(s)));
+        if (!sharesSlot) return false;
+        return next.start_time < b.end_time && next.end_time > b.start_time;
+      });
+      if (conflictingBlock) {
+        return {
+          ok: false,
+          reason: 'conflict',
+          message: `Choca con un bloqueo: ${conflictingBlock.reason}.`,
+        };
+      }
+    }
+
+    const { error } = await supabase
+      .from('bookings')
+      .update({
+        date: next.date,
+        start_time: next.start_time,
+        end_time: next.end_time,
+        total_price: next.total_price,
+        payment_method: next.payment_method,
+        notes: next.notes,
+      })
+      .eq('id', input.bookingId);
+
+    if (error) {
+      console.error('Error updating booking:', error);
+      return { ok: false, reason: 'db_error', message: error.message ?? 'Error al guardar los cambios.' };
     }
 
     await reload();
@@ -1430,6 +1647,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     createBooking,
     cancelBooking,
     updateBookingStatus,
+    updateBooking,
     confirmBooking,
     rejectBooking,
     replacePaymentProof,

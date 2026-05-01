@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CalendarPlus, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   Dialog,
@@ -8,7 +8,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,7 +18,7 @@ import { useDialogBackButton } from '@/hooks/useDialogBackButton';
 import { findAvailableUnit, getUnitsByType } from '@/lib/availability';
 import { TIME_SLOTS } from '@/data/mockData';
 import { FieldType, PaymentMethod } from '@/types';
-import { formatCurrency } from '@/lib/bookingFormat';
+import { formatCurrency, formatTime12h } from '@/lib/bookingFormat';
 
 const STATUS_OPTIONS: { value: 'confirmed' | 'pending'; label: string }[] = [
   { value: 'confirmed', label: 'Confirmada (pago recibido)' },
@@ -44,17 +43,34 @@ interface FormState {
   status: 'confirmed' | 'pending';
   total_price: string;
   notes: string;
+  /** Si está presente, el submit usa esta unidad específica en lugar de auto-seleccionar. */
+  field_unit_id: string;
+}
+
+export interface AdminCreateBookingInitialValues {
+  club_id?: string;
+  field_id?: string;
+  field_unit_id?: string;
+  mode?: FieldType;
+  date?: string;
+  start_time?: string;
+  end_time?: string;
+}
+
+interface Props {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  initialValues?: AdminCreateBookingInitialValues;
 }
 
 const todayIso = () => new Date().toISOString().split('T')[0];
 
-export default function AdminCreateBookingDialog() {
+export default function AdminCreateBookingDialog({ open, onOpenChange, initialValues }: Props) {
   const { user, isStaff, staffClubId } = useAuth();
   const { clubs, fields, profiles, pricingRules, bookings, blocks, createBooking } = useAppData();
-  const [open, setOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  useDialogBackButton(open, () => setOpen(false));
+  useDialogBackButton(open, () => onOpenChange(false));
 
   const ownedClubs = useMemo(() => {
     if (isStaff && staffClubId) return clubs.filter((c) => c.id === staffClubId);
@@ -81,9 +97,26 @@ export default function AdminCreateBookingDialog() {
     status: 'confirmed',
     total_price: '',
     notes: '',
+    field_unit_id: '',
   });
 
-  // Cuando se abre el dialog, sincroniza club por defecto.
+  // Cuando se abre el dialog, aplicamos los initialValues (si vienen del
+  // calendario diario) y sincronizamos el club por defecto.
+  useEffect(() => {
+    if (!open) return;
+    setForm((prev) => ({
+      ...prev,
+      club_id: initialValues?.club_id ?? prev.club_id ?? ownedClubs[0]?.id ?? '',
+      field_id: initialValues?.field_id ?? prev.field_id,
+      mode: initialValues?.mode ?? prev.mode,
+      date: initialValues?.date ?? prev.date,
+      start_time: initialValues?.start_time ?? prev.start_time,
+      end_time: initialValues?.end_time ?? prev.end_time,
+      field_unit_id: initialValues?.field_unit_id ?? '',
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
   useEffect(() => {
     if (open && !form.club_id && ownedClubs[0]) {
       setForm((prev) => ({ ...prev, club_id: ownedClubs[0].id }));
@@ -174,6 +207,7 @@ export default function AdminCreateBookingDialog() {
       status: 'confirmed',
       total_price: '',
       notes: '',
+      field_unit_id: '',
     });
   };
 
@@ -203,17 +237,24 @@ export default function AdminCreateBookingDialog() {
     }
     if (!selectedField || !form.mode) return;
 
-    // Auto-selecciona la unidad disponible.
-    const unit = findAvailableUnit(
-      form.date,
-      form.start_time,
-      form.end_time,
-      form.mode as FieldType,
-      selectedField,
-      bookings,
-      blocks,
-    );
-    if (!unit) {
+    // Si vino prefilled con una unidad específica (click en calendario diario),
+    // usamos esa. Si no, auto-seleccionamos la primera disponible.
+    let unitId: string | null = null;
+    if (form.field_unit_id && selectedField.units.some((u) => u.id === form.field_unit_id)) {
+      unitId = form.field_unit_id;
+    } else {
+      const auto = findAvailableUnit(
+        form.date,
+        form.start_time,
+        form.end_time,
+        form.mode as FieldType,
+        selectedField,
+        bookings,
+        blocks,
+      );
+      unitId = auto?.id ?? null;
+    }
+    if (!unitId) {
       toast.error('No hay una unidad disponible para ese horario. Ya está reservada o bloqueada.');
       return;
     }
@@ -222,7 +263,7 @@ export default function AdminCreateBookingDialog() {
     const created = await createBooking({
       user_id: form.client_id,
       club_id: form.club_id,
-      field_unit_id: unit.id,
+      field_unit_id: unitId,
       field_type: form.mode as FieldType,
       date: form.date,
       start_time: form.start_time,
@@ -241,7 +282,7 @@ export default function AdminCreateBookingDialog() {
     }
 
     toast.success(`Reserva creada para ${selectedClient?.first_name} ${selectedClient?.last_name}.`);
-    setOpen(false);
+    onOpenChange(false);
     resetForm();
   };
 
@@ -250,15 +291,9 @@ export default function AdminCreateBookingDialog() {
       open={open}
       onOpenChange={(next) => {
         if (!next) resetForm();
-        setOpen(next);
+        onOpenChange(next);
       }}
     >
-      <DialogTrigger asChild>
-        <Button>
-          <CalendarPlus className="mr-2 h-4 w-4" />
-          Crear reserva manual
-        </Button>
-      </DialogTrigger>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Nueva reserva manual</DialogTitle>
@@ -364,7 +399,7 @@ export default function AdminCreateBookingDialog() {
               <Select value={form.start_time} onValueChange={(value) => setForm((p) => ({ ...p, start_time: value }))}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {TIME_SLOTS.slice(0, -1).map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                  {TIME_SLOTS.slice(0, -1).map((t) => <SelectItem key={t} value={t}>{formatTime12h(t)}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -373,7 +408,7 @@ export default function AdminCreateBookingDialog() {
               <Select value={form.end_time} onValueChange={(value) => setForm((p) => ({ ...p, end_time: value }))}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {TIME_SLOTS.slice(1).map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                  {TIME_SLOTS.slice(1).map((t) => <SelectItem key={t} value={t}>{formatTime12h(t)}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>

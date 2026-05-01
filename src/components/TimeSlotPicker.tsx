@@ -1,6 +1,7 @@
 import { useMemo, useState, useEffect } from 'react';
 import { TimeSlot } from '@/types';
 import { Clock, Timer } from 'lucide-react';
+import { formatTime12h } from '@/lib/bookingFormat';
 
 interface Props {
   slots: TimeSlot[];
@@ -164,7 +165,7 @@ export default function TimeSlotPicker({
                       : 'border-border bg-card text-card-foreground hover:border-primary/50 hover:bg-accent/20'
                 }`}
               >
-                {slot.start}
+                {formatTime12h(slot.start)}
               </button>
             );
           })}
@@ -224,7 +225,7 @@ export default function TimeSlotPicker({
         <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3">
           <p className="text-sm font-medium text-foreground">
             <Clock className="mr-1.5 inline h-3.5 w-3.5 text-primary" />
-            {selectedStart} – {endTimeLabel}
+            {formatTime12h(selectedStart)} – {formatTime12h(endTimeLabel)}
             <span className="ml-2 text-muted-foreground">({currentDuration} min)</span>
           </p>
         </div>

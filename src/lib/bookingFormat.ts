@@ -1,4 +1,4 @@
-import { BookingStatus, FieldType } from '@/types';
+import { BookingStatus, FieldType, PaymentMethod } from '@/types';
 
 const STATUS_LABEL_ES: Record<BookingStatus, string> = {
   pending: 'Pendiente',
@@ -46,6 +46,42 @@ export function formatBlockType(type: string | null | undefined): string {
 
 export function formatCurrency(amount: number | null | undefined): string {
   return `RD$ ${(amount ?? 0).toLocaleString('es-DO')}`;
+}
+
+const PAYMENT_METHOD_LABEL_ES: Record<PaymentMethod, string> = {
+  bank_transfer: 'Transferencia bancaria',
+  cash: 'Efectivo en oficina',
+  card: 'Tarjeta en oficina',
+};
+
+export function formatPaymentMethod(method: PaymentMethod | string | null | undefined): string {
+  if (!method) return '—';
+  return PAYMENT_METHOD_LABEL_ES[method as PaymentMethod] ?? method;
+}
+
+/**
+ * Convierte "HH:MM" (24h) a "H:MM am/pm" para mostrar al usuario.
+ * Internamente la app sigue trabajando en 24h — esto es solo display.
+ *
+ *   formatTime12h('08:00') → '8:00 am'
+ *   formatTime12h('00:30') → '12:30 am'
+ *   formatTime12h('13:45') → '1:45 pm'
+ *   formatTime12h('23:00') → '11:00 pm'
+ */
+export function formatTime12h(time: string | null | undefined): string {
+  if (!time) return '—';
+  const [hStr, mStr] = time.split(':');
+  if (!hStr) return time;
+  const h = parseInt(hStr, 10);
+  if (Number.isNaN(h)) return time;
+  const m = (mStr ?? '00').slice(0, 2).padStart(2, '0');
+  const period = h >= 12 ? 'pm' : 'am';
+  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+  return `${h12}:${m} ${period}`;
+}
+
+export function formatTimeRange12h(start: string, end: string): string {
+  return `${formatTime12h(start)} – ${formatTime12h(end)}`;
 }
 
 export function formatBookingDate(dateString: string): string {

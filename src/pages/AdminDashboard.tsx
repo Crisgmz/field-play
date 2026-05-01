@@ -5,6 +5,7 @@ import {
   BellRing,
   Building2,
   Calendar,
+  CalendarPlus,
   ChevronLeft,
   ChevronRight,
   DollarSign,
@@ -36,9 +37,11 @@ import ClosedDatesEditor from '@/components/ClosedDatesEditor';
 import ClubGalleryManager from '@/components/ClubGalleryManager';
 import TeamPanel from '@/components/TeamPanel';
 import AdminWeekCalendar from '@/components/AdminWeekCalendar';
+import AdminDailyCalendar from '@/components/AdminDailyCalendar';
 import ReportsSection from '@/components/ReportsSection';
-import AdminCreateBookingDialog from '@/components/AdminCreateBookingDialog';
-import { formatBlockType, formatBookingDate, formatBookingStatus, formatCurrency, getStatusTone } from '@/lib/bookingFormat';
+import AdminCreateBookingDialog, { type AdminCreateBookingInitialValues } from '@/components/AdminCreateBookingDialog';
+import EditBookingDialog from '@/components/EditBookingDialog';
+import { formatBlockType, formatBookingDate, formatBookingStatus, formatCurrency, formatTime12h, getStatusTone } from '@/lib/bookingFormat';
 import { KpiRowSkeleton, TableRowSkeleton } from '@/components/skeletons';
 import { useDialogBackButton } from '@/hooks/useDialogBackButton';
 import { Settings } from 'lucide-react';
@@ -109,6 +112,7 @@ export default function AdminDashboard() {
   // hacer navigate-back que sacaría al admin de la sección actual.
 
   const [calendarDate, setCalendarDate] = useState(new Date().toISOString().split('T')[0]);
+  const [calendarView, setCalendarView] = useState<'week' | 'day'>('week');
   const [selectedMobileCalendarDate, setSelectedMobileCalendarDate] = useState<string | null>(null);
   const [blockDialogOpen, setBlockDialogOpen] = useState(false);
   const [clubDialogOpen, setClubDialogOpen] = useState(false);
@@ -117,6 +121,9 @@ export default function AdminDashboard() {
   const [deleteBlockTarget, setDeleteBlockTarget] = useState<string | null>(null);
   const [fieldDialogOpen, setFieldDialogOpen] = useState(false);
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
+  const [editBookingId, setEditBookingId] = useState<string | null>(null);
+  const [createBookingOpen, setCreateBookingOpen] = useState(false);
+  const [createBookingPrefill, setCreateBookingPrefill] = useState<AdminCreateBookingInitialValues>({});
   const [selectedBookingProofUrl, setSelectedBookingProofUrl] = useState<string | null>(null);
   const [loadingBookingProofUrl, setLoadingBookingProofUrl] = useState(false);
   const [bookingActionMode, setBookingActionMode] = useState<'idle' | 'reject' | 'cancel-confirmed'>('idle');
@@ -127,6 +134,8 @@ export default function AdminDashboard() {
   // navegador. Esto fixea el caso "abro modal de reserva, presiono atrás
   // y se va a otra sección" — ahora el back solo cierra el modal.
   useDialogBackButton(Boolean(selectedBookingId), () => setSelectedBookingId(null));
+  useDialogBackButton(Boolean(editBookingId), () => setEditBookingId(null));
+  // Nota: AdminCreateBookingDialog ya hace su propio useDialogBackButton internamente.
   useDialogBackButton(blockDialogOpen, () => setBlockDialogOpen(false));
   useDialogBackButton(clubDialogOpen, () => setClubDialogOpen(false));
   useDialogBackButton(fieldDialogOpen, () => setFieldDialogOpen(false));
@@ -724,7 +733,7 @@ export default function AdminDashboard() {
                       return (
                         <tr key={booking.id} className="border-t border-border">
                           <td className="px-4 py-3 text-foreground">{formatBookingDate(booking.date)}</td>
-                          <td className="px-4 py-3 text-muted-foreground">{booking.start_time} – {booking.end_time}</td>
+                          <td className="px-4 py-3 text-muted-foreground">{formatTime12h(booking.start_time)} – {formatTime12h(booking.end_time)}</td>
                           <td className="px-4 py-3">{booking.field_type}</td>
                           <td className="px-4 py-3">
                             <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${tone.bg} ${tone.text}`}>
@@ -745,6 +754,102 @@ export default function AdminDashboard() {
       case 'calendar':
         return (
           <div className="space-y-4">
+            {/* Toggle Semana / Día */}
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="inline-flex rounded-2xl border border-border bg-card p-1 shadow-sm">
+                <button
+                  type="button"
+                  onClick={() => setCalendarView('week')}
+                  className={`rounded-xl px-4 py-1.5 text-sm font-medium transition-all ${
+                    calendarView === 'week'
+                      ? 'bg-primary text-primary-foreground shadow'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  Semana
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCalendarView('day')}
+                  className={`rounded-xl px-4 py-1.5 text-sm font-medium transition-all ${
+                    calendarView === 'day'
+                      ? 'bg-primary text-primary-foreground shadow'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  Día
+                </button>
+              </div>
+
+              {/* Navegador de fecha — distinto comportamiento según vista */}
+              {calendarView === 'day' ? (
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-9 w-9 rounded-lg p-0"
+                    onClick={() => {
+                      const d = new Date(`${calendarDate}T12:00:00`);
+                      d.setDate(d.getDate() - 1);
+                      setCalendarDate(d.toISOString().split('T')[0]);
+                    }}
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <Input
+                    type="date"
+                    value={calendarDate}
+                    onChange={(e) => setCalendarDate(e.target.value)}
+                    className="h-9 w-auto"
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-9 w-9 rounded-lg p-0"
+                    onClick={() => {
+                      const d = new Date(`${calendarDate}T12:00:00`);
+                      d.setDate(d.getDate() + 1);
+                      setCalendarDate(d.toISOString().split('T')[0]);
+                    }}
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+
+            {calendarView === 'day' && (
+              <AdminDailyCalendar
+                date={calendarDate}
+                fields={fields}
+                bookings={bookings}
+                blocks={blocks}
+                profiles={profiles}
+                onBookingClick={(id) => void openBookingDetails(id)}
+                onSlotClick={(unitId, time) => {
+                  const unit = fields
+                    .flatMap((f) => f.units.map((u) => ({ unit: u, field: f })))
+                    .find((entry) => entry.unit.id === unitId);
+                  if (!unit) return;
+                  // Default 1h de duración. Buscamos el slot siguiente +60min.
+                  const startIdx = TIME_SLOTS.indexOf(time);
+                  const endTime = TIME_SLOTS[Math.min(startIdx + 2, TIME_SLOTS.length - 1)] ?? time;
+                  setCreateBookingPrefill({
+                    club_id: unit.field.club_id,
+                    field_id: unit.field.id,
+                    field_unit_id: unit.unit.id,
+                    mode: unit.unit.type,
+                    date: calendarDate,
+                    start_time: time,
+                    end_time: endTime,
+                  });
+                  setCreateBookingOpen(true);
+                }}
+              />
+            )}
+
+            {calendarView === 'week' && (
+            <>
             <div className="flex items-center justify-between gap-1.5 sm:gap-3 px-1">
               <Button variant="outline" size="sm" className="h-9 w-9 sm:h-12 sm:w-12 shrink-0 rounded-lg sm:rounded-2xl" onClick={() => {
                 const date = new Date(calendarDateObj);
@@ -809,7 +914,7 @@ export default function AdminDashboard() {
                         {dayEvents.map((event, index) => (
                           <div key={`${date}-${event.time}-${index}`} className="flex items-start gap-1.5 sm:gap-4 rounded-lg sm:rounded-3xl border border-border p-2 sm:p-5">
                             <div className="min-w-[50px] sm:min-w-[84px] rounded-md sm:rounded-2xl bg-muted px-1.5 sm:px-4 py-1 sm:py-3 text-center text-[11px] sm:text-base font-semibold text-foreground shrink-0 leading-tight">
-                              {event.time}
+                              {formatTime12h(event.time)}
                             </div>
                             <div className={`rounded-md sm:rounded-2xl px-2 sm:px-4 py-1 sm:py-3 text-[11px] sm:text-base font-medium break-words ${event.kind === 'booking' ? 'bg-primary text-primary-foreground' : 'bg-destructive text-destructive-foreground'}`}>
                               {event.label}
@@ -832,6 +937,8 @@ export default function AdminDashboard() {
                 onBookingClick={(id) => void openBookingDetails(id)}
               />
             </div>
+            </>
+            )}
           </div>
         );
 
@@ -839,7 +946,15 @@ export default function AdminDashboard() {
         return (
           <div className="space-y-4">
             <div className="flex flex-wrap items-center justify-end gap-2">
-              <AdminCreateBookingDialog />
+              <Button
+                onClick={() => {
+                  setCreateBookingPrefill({});
+                  setCreateBookingOpen(true);
+                }}
+              >
+                <CalendarPlus className="mr-2 h-4 w-4" />
+                Crear reserva manual
+              </Button>
             </div>
 
             {newPendingBookings.length > 0 && (
@@ -878,7 +993,7 @@ export default function AdminDashboard() {
                       <div className="rounded-xl border border-border p-3"><p className="text-xs text-muted-foreground">Tipo</p><p className="mt-1 font-semibold text-foreground">{selectedBooking.field_type}</p></div>
                       <div className="rounded-xl border border-border p-3"><p className="text-xs text-muted-foreground">Estado</p><p className="mt-1 font-semibold text-foreground">{selectedBooking.status}</p></div>
                       <div className="rounded-xl border border-border p-3"><p className="text-xs text-muted-foreground">Fecha</p><p className="mt-1 font-semibold text-foreground">{selectedBooking.date}</p></div>
-                      <div className="rounded-xl border border-border p-3"><p className="text-xs text-muted-foreground">Hora</p><p className="mt-1 font-semibold text-foreground">{selectedBooking.start_time} – {selectedBooking.end_time}</p></div>
+                      <div className="rounded-xl border border-border p-3"><p className="text-xs text-muted-foreground">Hora</p><p className="mt-1 font-semibold text-foreground">{formatTime12h(selectedBooking.start_time)} – {formatTime12h(selectedBooking.end_time)}</p></div>
                     </div>
                     <div className="rounded-xl bg-accent p-4 text-accent-foreground">
                       <p className="text-xs">Total</p>
@@ -929,6 +1044,18 @@ export default function AdminDashboard() {
                     )}
 
                     <div className="flex flex-col gap-2 pt-2">
+                      {/* Botón de Editar visible para reservas no canceladas. Permite
+                          modificar fecha, hora, precio, método de pago y notas. */}
+                      {selectedBooking.status !== 'cancelled' && bookingActionMode === 'idle' && (
+                        <Button
+                          variant="outline"
+                          className="w-full"
+                          onClick={() => setEditBookingId(selectedBooking.id)}
+                        >
+                          Editar reserva
+                        </Button>
+                      )}
+
                       {selectedBooking.status === 'pending' && bookingActionMode === 'idle' && (
                         <>
                           <Button className="w-full bg-emerald-600 text-white hover:bg-emerald-700" onClick={() => void handleConfirmBooking(selectedBooking.id)} disabled={bookingActionBusy}>
@@ -1025,7 +1152,7 @@ export default function AdminDashboard() {
                       </div>
                       <div className="rounded-xl bg-muted/50 p-3">
                         <p className="text-xs text-muted-foreground">Hora</p>
-                        <p className="mt-1 font-medium text-foreground">{booking.start_time} – {booking.end_time}</p>
+                        <p className="mt-1 font-medium text-foreground">{formatTime12h(booking.start_time)} – {formatTime12h(booking.end_time)}</p>
                       </div>
                     </div>
 
@@ -1065,7 +1192,7 @@ export default function AdminDashboard() {
                             {booking.id.slice(0, 8)}
                           </td>
                           <td className="px-4 py-3">{booking.date}</td>
-                          <td className="px-4 py-3">{booking.start_time} – {booking.end_time}</td>
+                          <td className="px-4 py-3">{formatTime12h(booking.start_time)} – {formatTime12h(booking.end_time)}</td>
                           <td className="px-4 py-3">{booking.field_type}</td>
                           <td className="px-4 py-3">
                             <span className={booking.status === 'confirmed'
@@ -1208,13 +1335,13 @@ export default function AdminDashboard() {
                     <Select value={blockForm.start_time} onValueChange={(value) => setBlockForm((prev) => ({ ...prev, start_time: value }))}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        {TIME_SLOTS.slice(0, -1).map((time) => <SelectItem key={time} value={time}>{time}</SelectItem>)}
+                        {TIME_SLOTS.slice(0, -1).map((time) => <SelectItem key={time} value={time}>{formatTime12h(time)}</SelectItem>)}
                       </SelectContent>
                     </Select>
                     <Select value={blockForm.end_time} onValueChange={(value) => setBlockForm((prev) => ({ ...prev, end_time: value }))}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        {TIME_SLOTS.slice(1).map((time) => <SelectItem key={time} value={time}>{time}</SelectItem>)}
+                        {TIME_SLOTS.slice(1).map((time) => <SelectItem key={time} value={time}>{formatTime12h(time)}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
@@ -1291,7 +1418,7 @@ export default function AdminDashboard() {
                               ? `${formatBookingDate(firstDate)} → ${formatBookingDate(lastDate)}`
                               : formatBookingDate(firstDate)}
                             {' · '}
-                            {group.start_time} – {group.end_time}
+                            {formatTime12h(group.start_time)} – {formatTime12h(group.end_time)}
                           </p>
                           <p className="mt-1 text-xs text-muted-foreground">
                             Unidades afectadas: {group.unitsAffected}
@@ -1939,6 +2066,18 @@ export default function AdminDashboard() {
       </div>
 
       {renderSection()}
+
+      <EditBookingDialog
+        booking={bookings.find((b) => b.id === editBookingId) ?? null}
+        open={Boolean(editBookingId)}
+        onOpenChange={(open) => !open && setEditBookingId(null)}
+      />
+
+      <AdminCreateBookingDialog
+        open={createBookingOpen}
+        onOpenChange={setCreateBookingOpen}
+        initialValues={createBookingPrefill}
+      />
 
       <AlertDialog open={!!deleteBlockTarget} onOpenChange={(open) => !open && setDeleteBlockTarget(null)}>
         <AlertDialogContent>

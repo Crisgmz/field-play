@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { Block, Booking, Field } from '@/types';
 import { TIME_SLOTS } from '@/data/mockData';
-import { formatBlockType, formatBookingStatus } from '@/lib/bookingFormat';
+import { formatBlockType, formatBookingStatus, formatTime12h } from '@/lib/bookingFormat';
 
 interface Props {
   weekDates: string[];
@@ -104,7 +104,7 @@ export default function AdminWeekCalendar({ weekDates, bookings, blocks, fields,
                   className="flex items-start justify-end pr-2 pt-0.5 text-[10px] tabular-nums text-muted-foreground"
                   style={{ height: TIME_LABEL_HEIGHT }}
                 >
-                  {showLabel ? time : ''}
+                  {showLabel ? formatTime12h(time) : ''}
                 </div>
               );
             })}
@@ -142,11 +142,11 @@ export default function AdminWeekCalendar({ weekDates, bookings, blocks, fields,
                       onClick={() => onBookingClick?.(booking.id)}
                       className={`absolute left-1 right-1 flex flex-col overflow-hidden rounded-md px-1.5 py-1 text-left shadow-sm ring-1 ring-inset transition-transform hover:z-10 hover:scale-[1.02] ${colors.bg} ${colors.ring} ${colors.text}`}
                       style={{ top, height }}
-                      title={`${formatBookingStatus(booking.status)} · ${booking.start_time}–${booking.end_time} · ${unit?.name ?? booking.field_type}`}
+                      title={`${formatBookingStatus(booking.status)} · ${formatTime12h(booking.start_time)}–${formatTime12h(booking.end_time)} · ${unit?.name ?? booking.field_type}`}
                     >
                       <div className="flex items-center gap-1 text-[10px] font-bold leading-tight">
                         <span className="rounded bg-white/30 px-1 py-px">{booking.field_type}</span>
-                        <span className="tabular-nums opacity-90">{booking.start_time.slice(0, 5)}</span>
+                        <span className="tabular-nums opacity-90">{formatTime12h(booking.start_time)}</span>
                       </div>
                       {height >= 36 && (
                         <div className="mt-0.5 truncate text-[10px] font-medium leading-tight opacity-95">
@@ -178,11 +178,11 @@ export default function AdminWeekCalendar({ weekDates, bookings, blocks, fields,
                         backgroundImage:
                           'repeating-linear-gradient(45deg, rgba(255,255,255,0) 0 6px, rgba(255,255,255,0.1) 6px 12px)',
                       }}
-                      title={`${formatBlockType(block.type)} · ${block.start_time}–${block.end_time} · ${block.reason}`}
+                      title={`${formatBlockType(block.type)} · ${formatTime12h(block.start_time)}–${formatTime12h(block.end_time)} · ${block.reason}`}
                     >
                       <div className="flex items-center gap-1 text-[10px] font-bold leading-tight">
                         <span className="rounded bg-white/20 px-1 py-px uppercase">{formatBlockType(block.type)}</span>
-                        <span className="tabular-nums opacity-90">{block.start_time.slice(0, 5)}</span>
+                        <span className="tabular-nums opacity-90">{formatTime12h(block.start_time)}</span>
                       </div>
                       {height >= 36 && (
                         <div className="mt-0.5 truncate text-[10px] font-medium leading-tight opacity-95">

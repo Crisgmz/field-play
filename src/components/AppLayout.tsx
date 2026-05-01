@@ -1,6 +1,7 @@
 import { ReactNode, useMemo, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { getDisplayName, useAuth } from '@/contexts/AuthContext';
+import { useAppData } from '@/contexts/AppDataContext';
 import {
   Home,
   Calendar,
@@ -60,10 +61,34 @@ const adminSections: AdminNavItem[] = [
 ];
 
 export default function AppLayout({ children }: { children: ReactNode }) {
-  const { user, logout, isAdmin, isStaff, isAdminLevel } = useAuth();
+  const { user, logout, isAdmin, isStaff, isAdminLevel, staffClubId } = useAuth();
+  const { bookings } = useAppData();
   const navigate = useNavigate();
   const location = useLocation();
   const [sheetOpen, setSheetOpen] = useState(false);
+
+  // Cantidad de reservas pendientes nuevas que el admin/staff aún no
+  // ha abierto. Se muestra como badge sobre el item "Reservas" del
+  // sidebar para llamar la atención.
+  const pendingBadge = useMemo(() => {
+    if (!isAdminLevel) return 0;
+    let allowedClubIds: Set<string> | null = null;
+    if (isStaff && staffClubId) {
+      allowedClubIds = new Set([staffClubId]);
+    }
+    return bookings.filter((b) => {
+      if (b.status !== 'pending' || b.admin_seen_at) return false;
+      if (allowedClubIds && !allowedClubIds.has(b.club_id)) return false;
+      return true;
+    }).length;
+  }, [bookings, isAdminLevel, isStaff, staffClubId]);
+
+  // Cliente: cuántas de SUS reservas están pendientes (info útil sobre
+  // el item "Mis reservas").
+  const myPendingBadge = useMemo(() => {
+    if (isAdminLevel || !user) return 0;
+    return bookings.filter((b) => b.user_id === user.id && b.status === 'pending').length;
+  }, [bookings, isAdminLevel, user]);
   const [logoutDialogOpen, setLogoutDialogOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
 
@@ -127,6 +152,17 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       <div className="-mx-1 flex-1 space-y-1 overflow-y-auto px-1">
         {navItems.map((item) => {
           const active = location.pathname === item.path;
+
+          // Badge de notificación para los items que lo necesiten:
+          // - Admin/staff: "Reservas" muestra cantidad de pendientes nuevas
+          // - Cliente: "Mis reservas" muestra cantidad de pendientes propias
+          let badge = 0;
+          if (isAdminLevel && item.path === '/admin/bookings') {
+            badge = pendingBadge;
+          } else if (!isAdminLevel && item.path === '/bookings') {
+            badge = myPendingBadge;
+          }
+
           return (
             <button
               key={item.path}
@@ -134,18 +170,33 @@ export default function AppLayout({ children }: { children: ReactNode }) {
                 navigate(item.path);
                 setSheetOpen(false);
               }}
-              className={`flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-sm font-medium transition-all ${
+              className={`relative flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-sm font-medium transition-all ${
                 active
                   ? 'bg-primary text-primary-foreground shadow'
                   : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
               }`}
             >
-              <span className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl ${
+              <span className={`relative flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl ${
                 active ? 'bg-white/15' : 'bg-muted'
               }`}>
                 <item.icon className="h-4.5 w-4.5" />
+                {badge > 0 && (
+                  <span
+                    aria-label={`${badge} pendiente${badge === 1 ? '' : 's'}`}
+                    className="absolute -right-1 -top-1 flex h-5 min-w-[20px] animate-pulse items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white shadow ring-2 ring-card"
+                  >
+                    {badge > 99 ? '99+' : badge}
+                  </span>
+                )}
               </span>
               <span className="flex-1 text-left">{item.label}</span>
+              {badge > 0 && (
+                <span className={`ml-auto rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                  active ? 'bg-white/25 text-white' : 'bg-rose-100 text-rose-700'
+                }`}>
+                  {badge > 99 ? '99+' : badge} nueva{badge === 1 ? '' : 's'}
+                </span>
+              )}
             </button>
           );
         })}

@@ -1,6 +1,12 @@
 import { Block, Booking, Field, FieldType, User } from '@/types';
 import { VenueConfig } from '@/types/courtConfig';
 
+function hourLabel12h(hour: number): string {
+  if (hour === 0) return '12 am';
+  if (hour === 12) return '12 pm';
+  return hour < 12 ? `${hour} am` : `${hour - 12} pm`;
+}
+
 // ============================================================
 // Cálculos puros para la sección de reportes.
 // Recibimos los arrays ya filtrados por club + rango de fechas
@@ -200,7 +206,7 @@ export interface HourBreakdown {
 export function computeHourBreakdown(bookings: Booking[], range: ReportsRange): HourBreakdown[] {
   const buckets: HourBreakdown[] = Array.from({ length: 24 }, (_, hour) => ({
     hour,
-    label: `${hour.toString().padStart(2, '0')}:00`,
+    label: hourLabel12h(hour),
     bookings: 0,
   }));
 

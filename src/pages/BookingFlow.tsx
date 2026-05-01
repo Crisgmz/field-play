@@ -1,12 +1,14 @@
 import { ChangeEvent, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Building2, CalendarDays, CheckCircle, Clock3, Landmark, Mail, MapPin, Phone, Sparkles, Star, Upload, Users } from 'lucide-react';
+import { ArrowLeft, Banknote, Building2, CalendarDays, CheckCircle, Clock3, CreditCard, Landmark, Mail, MapPin, Phone, Sparkles, Star, Upload, Users } from 'lucide-react';
+import { PaymentMethod } from '@/types';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import FieldModeSelector from '@/components/FieldModeSelector';
 import TimeSlotPicker from '@/components/TimeSlotPicker';
 import ClubGallery from '@/components/ClubGallery';
-import { findAvailableUnit, getAvailableTimeSlotsV2, getUnitsByType } from '@/lib/availability';
+import { findAvailableUnit, getAvailableTimeSlotsV2, getUnitOptions, getUnitsByType } from '@/lib/availability';
+import { formatTime12h } from '@/lib/bookingFormat';
 import { useAppData } from '@/contexts/AppDataContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
@@ -52,6 +54,8 @@ export default function BookingFlow() {
   const [serverTimeline, setServerTimeline] = useState<TimeSlot[] | null>(null);
   const [serverPrice, setServerPrice] = useState<number | null>(null);
   const [paymentProofFile, setPaymentProofFile] = useState<File | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('bank_transfer');
+  const [manualUnitId, setManualUnitId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const venueConfig = club ? getVenueConfig(club.id) : null;
@@ -78,6 +82,22 @@ export default function BookingFlow() {
     if (!selectedMode || !startTime || !endTime || !field) return null;
     return findAvailableUnit(selectedDate, startTime, endTime, selectedMode, field, bookings, blocks);
   }, [selectedMode, selectedDate, startTime, endTime, field, bookings, blocks]);
+
+  // Lista completa de unidades del tipo (con su disponibilidad). El cliente
+  // puede elegir manualmente una específica si no le sirve la auto-seleccionada.
+  const unitOptions = useMemo(() => {
+    if (!selectedMode || !startTime || !endTime || !field) return [];
+    return getUnitOptions(selectedDate, startTime, endTime, selectedMode, field, bookings, blocks);
+  }, [selectedMode, selectedDate, startTime, endTime, field, bookings, blocks]);
+
+  // Unidad efectiva: la manual si existe y sigue disponible, si no la auto.
+  const selectedUnit = useMemo(() => {
+    if (manualUnitId) {
+      const found = unitOptions.find((u) => u.id === manualUnitId);
+      if (found && found.available) return found;
+    }
+    return autoUnit;
+  }, [manualUnitId, unitOptions, autoUnit]);
 
   const fallbackTotalPrice = Math.round((pricePerHour / 60) * selectedMinutes);
   const totalPrice = serverPrice ?? fallbackTotalPrice;
@@ -151,15 +171,18 @@ export default function BookingFlow() {
     setSelectedMode(type);
     setSelectedHours([]);
     setPaymentProofFile(null);
+    setManualUnitId(null);
   };
 
   const handleSelectDate = (date: string) => {
     setSelectedDate(date);
     setSelectedHours([]);
+    setManualUnitId(null);
   };
 
   const handleSelectionChange = (newSlots: string[]) => {
     setSelectedHours(newSlots);
+    setManualUnitId(null);
   };
 
   const handlePaymentProofChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -197,18 +220,22 @@ export default function BookingFlow() {
     selectedMode &&
     startTime &&
     endTime &&
-    autoUnit &&
+    selectedUnit &&
     selectedMinutes >= minimumMinutes &&
     selectedMinutes % incrementMinutes === 0,
   );
 
-  const canConfirm = canProceedToPay && Boolean(paymentProofFile);
+  // Solo la transferencia exige comprobante. Para efectivo y tarjeta el
+  // cliente paga al llegar al club, así que la reserva queda 'pending' y
+  // el admin la confirma en persona.
+  const requiresProof = paymentMethod === 'bank_transfer';
+  const canConfirm = canProceedToPay && (!requiresProof || Boolean(paymentProofFile));
 
   const handleContinueToPay = () => {
     if (!canProceedToPay) {
       if (!selectedMode) toast.error('Selecciona la modalidad');
       else if (!startTime) toast.error('Selecciona la hora');
-      else if (!autoUnit) toast.error('No hay disponibilidad para ese horario.');
+      else if (!selectedUnit) toast.error('No hay disponibilidad para ese horario.');
       else if (selectedMinutes < minimumMinutes) toast.error(`La reserva mínima es de ${minimumMinutes} minutos.`);
       else if (selectedMinutes % incrementMinutes !== 0) toast.error(`Solo se permiten incrementos de ${incrementMinutes} minutos.`);
       return;
@@ -217,8 +244,8 @@ export default function BookingFlow() {
   };
 
   const handleConfirm = async () => {
-    if (!selectedMode || !user || !startTime || !endTime || !club || !field || !autoUnit) return;
-    if (!paymentProofFile) {
+    if (!selectedMode || !user || !startTime || !endTime || !club || !field || !selectedUnit) return;
+    if (requiresProof && !paymentProofFile) {
       toast.error('Adjunta el comprobante de pago para continuar.');
       return;
     }
@@ -226,23 +253,29 @@ export default function BookingFlow() {
     setSubmitting(true);
     let uploadedProofPath: string | null = null;
     try {
-      uploadedProofPath = await uploadPaymentProof();
+      // Solo subimos comprobante si el método elegido es transferencia.
+      if (requiresProof) {
+        uploadedProofPath = await uploadPaymentProof();
+      }
       const created = await createBooking({
         user_id: user.id,
         club_id: club.id,
-        field_unit_id: autoUnit.id,
+        field_unit_id: selectedUnit.id,
         field_type: selectedMode,
         date: selectedDate,
         start_time: startTime,
         end_time: endTime,
         total_price: totalPrice,
         status: 'pending',
-        payment_method: 'bank_transfer',
+        payment_method: paymentMethod,
         payment_proof_path: uploadedProofPath,
       });
       if (!created) throw new Error('No se pudo registrar la reserva.');
       setStep('done');
-      toast.success('Reserva enviada. Te avisaremos cuando el pago sea validado.');
+      const successMsg = requiresProof
+        ? 'Reserva enviada. Te avisaremos cuando el pago sea validado.'
+        : 'Reserva creada. Pasa por el club a completar el pago para confirmarla.';
+      toast.success(successMsg);
     } catch (error) {
       if (uploadedProofPath) {
         await supabase.storage.from('booking-proofs').remove([uploadedProofPath]);
@@ -270,7 +303,7 @@ export default function BookingFlow() {
         <h2 className="mt-4 font-heading text-2xl font-bold text-foreground">Solicitud enviada correctamente</h2>
         <p className="mt-2 text-sm text-muted-foreground">
           {selectedMode} en {club.name}<br />
-          {selectedDate} · {startTime} – {endTime}<br />
+          {selectedDate} · {formatTime12h(startTime)} – {formatTime12h(endTime)}<br />
           Total reportado: RD$ {totalPrice.toLocaleString()}<br />
           Estado actual: pendiente de validación administrativa.
         </p>
@@ -455,6 +488,67 @@ export default function BookingFlow() {
                 )}
               </section>
 
+              {/* Selector de cancha específica — aparece cuando hay
+                  fecha+hora válidas y más de una unidad disponible. Si
+                  hay solo una, no tiene sentido pedir que elija. */}
+              {selectedMode && startTime && endTime && unitOptions.length > 1 && (
+                <section className="space-y-3">
+                  <header>
+                    <h2 className="font-heading text-base font-bold text-foreground">3. Cancha</h2>
+                    <p className="text-xs text-muted-foreground">
+                      Te seleccionamos una automáticamente. Si prefieres otra, elige la que quieras de las disponibles.
+                    </p>
+                  </header>
+                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    {unitOptions.map((option) => {
+                      const isAuto = autoUnit?.id === option.id && !manualUnitId;
+                      const isManual = manualUnitId === option.id;
+                      const isSelected = isAuto || isManual;
+                      return (
+                        <button
+                          key={option.id}
+                          type="button"
+                          disabled={!option.available}
+                          onClick={() => setManualUnitId(option.id)}
+                          className={`relative rounded-2xl border-2 p-3 text-left transition-all ${
+                            !option.available
+                              ? 'cursor-not-allowed border-border bg-muted/40 opacity-60'
+                              : isSelected
+                                ? 'border-primary bg-primary/5 shadow-sm'
+                                : 'border-border bg-card hover:border-primary/40 hover:bg-accent/40'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0 flex-1">
+                              <p className="font-heading text-sm font-bold text-foreground">{option.name}</p>
+                              <p className="mt-0.5 text-xs text-muted-foreground">
+                                {option.type} · {option.slot_ids.join(' + ')}
+                              </p>
+                            </div>
+                            <span
+                              className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                                option.available
+                                  ? isSelected
+                                    ? 'bg-primary text-primary-foreground'
+                                    : 'bg-emerald-100 text-emerald-700'
+                                  : 'bg-rose-100 text-rose-700'
+                              }`}
+                            >
+                              {option.available ? (isSelected ? 'Elegida' : 'Disponible') : 'Ocupada'}
+                            </span>
+                          </div>
+                          {isAuto && (
+                            <p className="mt-2 text-[10px] uppercase tracking-wide text-primary">
+                              Auto-seleccionada
+                            </p>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+              )}
+
               <Button
                 size="lg"
                 className="w-full sm:w-auto"
@@ -467,71 +561,163 @@ export default function BookingFlow() {
           )}
 
           {step === 'pay' && (
-            <section className="rounded-3xl border border-primary/20 bg-card p-5 shadow-sm">
-              <div className="flex items-center gap-2 text-primary">
-                <Landmark className="h-5 w-5" />
-                <h2 className="font-heading text-lg font-bold">Pago por transferencia o depósito</h2>
-              </div>
-              <p className="mt-2 text-sm text-muted-foreground">
-                Realiza el pago a la cuenta a continuación y adjunta el comprobante.
-              </p>
+            <section className="space-y-4">
+              {/* Selector de método de pago */}
+              <div className="rounded-3xl border border-border bg-card p-5 shadow-sm">
+                <h2 className="font-heading text-lg font-bold text-foreground">¿Cómo vas a pagar?</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Tu reserva queda en estado pendiente hasta que el pago se confirme.
+                </p>
 
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                <div className="rounded-xl border border-border bg-muted/30 p-3">
-                  <p className="text-xs text-muted-foreground">Banco</p>
-                  <p className="mt-1 font-semibold text-foreground">{BANK_ACCOUNT.bank}</p>
-                </div>
-                <div className="rounded-xl border border-border bg-muted/30 p-3">
-                  <p className="text-xs text-muted-foreground">Tipo de cuenta</p>
-                  <p className="mt-1 font-semibold text-foreground">{BANK_ACCOUNT.accountType}</p>
-                </div>
-                <div className="rounded-xl border border-border bg-muted/30 p-3">
-                  <p className="text-xs text-muted-foreground">Número de cuenta</p>
-                  <p className="mt-1 font-semibold text-foreground">{BANK_ACCOUNT.accountNumber}</p>
-                </div>
-                <div className="rounded-xl border border-border bg-muted/30 p-3">
-                  <p className="text-xs text-muted-foreground">Beneficiario</p>
-                  <p className="mt-1 font-semibold text-foreground">{BANK_ACCOUNT.accountName}</p>
+                <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                  {([
+                    { value: 'bank_transfer' as const, label: 'Transferencia', description: 'Subes el comprobante', Icon: Landmark },
+                    { value: 'cash' as const, label: 'Efectivo', description: 'Pagas en oficina', Icon: Banknote },
+                    { value: 'card' as const, label: 'Tarjeta', description: 'Pagas en oficina', Icon: CreditCard },
+                  ]).map((option) => {
+                    const isActive = paymentMethod === option.value;
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => setPaymentMethod(option.value)}
+                        className={`flex flex-col items-start gap-2 rounded-2xl border-2 p-4 text-left transition-all ${
+                          isActive
+                            ? 'border-primary bg-primary/5 shadow-sm'
+                            : 'border-border bg-background hover:border-primary/40 hover:bg-accent/40'
+                        }`}
+                      >
+                        <span className={`flex h-9 w-9 items-center justify-center rounded-xl ${
+                          isActive ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+                        }`}>
+                          <option.Icon className="h-4 w-4" />
+                        </span>
+                        <div>
+                          <p className="font-semibold text-foreground">{option.label}</p>
+                          <p className="text-xs text-muted-foreground">{option.description}</p>
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
-              <div className="mt-5 rounded-xl border border-dashed border-border bg-background p-4">
-                <label htmlFor="payment-proof" className="flex cursor-pointer flex-col gap-2 text-sm text-foreground">
-                  <span className="flex items-center gap-2 font-medium">
-                    <Upload className="h-4 w-4" /> Adjuntar comprobante de pago
-                  </span>
-                  <span className="text-muted-foreground">Aceptamos JPG, PNG, WEBP o PDF de hasta 10 MB.</span>
-                  <input
-                    id="payment-proof"
-                    type="file"
-                    accept=".jpg,.jpeg,.png,.webp,.pdf"
-                    className="hidden"
-                    onChange={handlePaymentProofChange}
-                  />
-                  <span className="inline-flex w-fit rounded-full border border-border px-3 py-1 text-xs font-medium text-muted-foreground">
-                    Seleccionar archivo
-                  </span>
-                </label>
-                {paymentProofFile && (
-                  <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-                    Comprobante listo: {paymentProofFile.name} · {(paymentProofFile.size / 1024 / 1024).toFixed(1)} MB
+              {/* Contenido condicional según método */}
+              {paymentMethod === 'bank_transfer' ? (
+                <div className="rounded-3xl border border-primary/20 bg-card p-5 shadow-sm">
+                  <div className="flex items-center gap-2 text-primary">
+                    <Landmark className="h-5 w-5" />
+                    <h3 className="font-heading text-base font-bold">Datos para la transferencia</h3>
+                  </div>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Realiza el pago a la cuenta y adjunta el comprobante para que el club lo valide.
                   </p>
-                )}
+
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-xl border border-border bg-muted/30 p-3">
+                      <p className="text-xs text-muted-foreground">Banco</p>
+                      <p className="mt-1 font-semibold text-foreground">{BANK_ACCOUNT.bank}</p>
+                    </div>
+                    <div className="rounded-xl border border-border bg-muted/30 p-3">
+                      <p className="text-xs text-muted-foreground">Tipo de cuenta</p>
+                      <p className="mt-1 font-semibold text-foreground">{BANK_ACCOUNT.accountType}</p>
+                    </div>
+                    <div className="rounded-xl border border-border bg-muted/30 p-3">
+                      <p className="text-xs text-muted-foreground">Número de cuenta</p>
+                      <p className="mt-1 font-semibold text-foreground">{BANK_ACCOUNT.accountNumber}</p>
+                    </div>
+                    <div className="rounded-xl border border-border bg-muted/30 p-3">
+                      <p className="text-xs text-muted-foreground">Beneficiario</p>
+                      <p className="mt-1 font-semibold text-foreground">{BANK_ACCOUNT.accountName}</p>
+                    </div>
+                  </div>
+
+                  <div className="mt-5 rounded-xl border border-dashed border-border bg-background p-4">
+                    <label htmlFor="payment-proof" className="flex cursor-pointer flex-col gap-2 text-sm text-foreground">
+                      <span className="flex items-center gap-2 font-medium">
+                        <Upload className="h-4 w-4" /> Adjuntar comprobante de pago
+                      </span>
+                      <span className="text-muted-foreground">Aceptamos JPG, PNG, WEBP o PDF de hasta 10 MB.</span>
+                      <input
+                        id="payment-proof"
+                        type="file"
+                        accept=".jpg,.jpeg,.png,.webp,.pdf"
+                        className="hidden"
+                        onChange={handlePaymentProofChange}
+                      />
+                      <span className="inline-flex w-fit rounded-full border border-border px-3 py-1 text-xs font-medium text-muted-foreground">
+                        Seleccionar archivo
+                      </span>
+                    </label>
+                    {paymentProofFile && (
+                      <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                        Comprobante listo: {paymentProofFile.name} · {(paymentProofFile.size / 1024 / 1024).toFixed(1)} MB
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-3xl border border-primary/20 bg-card p-5 shadow-sm">
+                  <div className="flex items-center gap-2 text-primary">
+                    {paymentMethod === 'cash' ? <Banknote className="h-5 w-5" /> : <CreditCard className="h-5 w-5" />}
+                    <h3 className="font-heading text-base font-bold">
+                      {paymentMethod === 'cash' ? 'Pago en efectivo en el club' : 'Pago con tarjeta en el club'}
+                    </h3>
+                  </div>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Tu reserva quedará registrada de inmediato. Pasa por el club a completar el pago para que se confirme.
+                  </p>
+
+                  <div className="mt-4 space-y-3 rounded-xl bg-muted/30 p-4">
+                    <div className="flex items-start gap-3">
+                      <MapPin className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" />
+                      <div className="text-sm">
+                        <p className="font-semibold text-foreground">{club.name}</p>
+                        <p className="text-muted-foreground">{club.location}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <Clock3 className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" />
+                      <div className="text-sm">
+                        <p className="font-semibold text-foreground">Horario de atención</p>
+                        <p className="text-muted-foreground">{club.open_time} – {club.close_time}</p>
+                      </div>
+                    </div>
+                    {club.phone && (
+                      <div className="flex items-start gap-3">
+                        <Phone className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" />
+                        <a href={`tel:${club.phone}`} className="text-sm text-foreground hover:text-primary">
+                          {club.phone}
+                        </a>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
+                    <strong>Importante:</strong> si no completas el pago antes de tu hora reservada, el club puede liberar el espacio.
+                  </div>
+                </div>
+              )}
+
+              <div className="rounded-3xl border border-border bg-card p-5 shadow-sm">
+                <Button
+                  className="w-full sm:w-auto"
+                  size="lg"
+                  disabled={!canConfirm || submitting}
+                  onClick={handleConfirm}
+                >
+                  {submitting
+                    ? 'Procesando reserva...'
+                    : paymentMethod === 'bank_transfer'
+                      ? 'Enviar reserva y comprobante'
+                      : 'Reservar y pagar en el club'}
+                </Button>
+
+                <p className="mt-4 text-xs text-muted-foreground">
+                  <strong>Política de cancelación:</strong> con más de {CANCELLATION_POLICY_HOURS}h de anticipación calificas para reembolso.
+                  Cancelaciones con menos de {CANCELLATION_POLICY_HOURS}h o no-shows no son reembolsables.
+                </p>
               </div>
-
-              <Button
-                className="mt-5 w-full sm:w-auto"
-                size="lg"
-                disabled={!canConfirm || submitting}
-                onClick={handleConfirm}
-              >
-                {submitting ? 'Enviando reserva...' : 'Enviar reserva y comprobante'}
-              </Button>
-
-              <p className="mt-4 text-xs text-muted-foreground">
-                <strong>Política de cancelación:</strong> con más de {CANCELLATION_POLICY_HOURS}h de anticipación calificas para reembolso.
-                Cancelaciones con menos de {CANCELLATION_POLICY_HOURS}h o no-shows no son reembolsables.
-              </p>
             </section>
           )}
         </div>
@@ -557,16 +743,16 @@ export default function BookingFlow() {
               </div>
               <div className="flex items-start justify-between gap-3">
                 <dt className="text-muted-foreground">Horario</dt>
-                <dd className="font-medium text-right">{startTime && endTime ? `${startTime} – ${endTime}` : '—'}</dd>
+                <dd className="font-medium text-right">{startTime && endTime ? `${formatTime12h(startTime)} – ${formatTime12h(endTime)}` : '—'}</dd>
               </div>
               <div className="flex items-start justify-between gap-3">
                 <dt className="text-muted-foreground">Duración</dt>
                 <dd className="font-medium text-right">{selectedMinutes ? `${selectedMinutes} min` : '—'}</dd>
               </div>
-              {autoUnit && (
+              {selectedUnit && (
                 <div className="flex items-start justify-between gap-3">
                   <dt className="text-muted-foreground flex items-center gap-1"><Users className="h-3.5 w-3.5" />Espacio</dt>
-                  <dd className="font-medium text-right">{autoUnit.name}</dd>
+                  <dd className="font-medium text-right">{selectedUnit.name}</dd>
                 </div>
               )}
             </dl>

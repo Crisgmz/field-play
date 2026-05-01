@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/supabase';
 import { Booking } from '@/types';
 import { BookingsListSkeleton } from '@/components/skeletons';
+import { formatTime12h } from '@/lib/bookingFormat';
 
 const ACCEPTED_PROOF_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
 const MAX_PROOF_SIZE_BYTES = 10 * 1024 * 1024;
@@ -130,7 +131,7 @@ export default function MyBookings() {
                 </div>
                 <div className="mt-3 flex flex-wrap gap-4 text-xs text-muted-foreground">
                   <span className="flex items-center gap-1"><Calendar className="h-3 w-3" />{booking.date}</span>
-                  <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{booking.start_time} – {booking.end_time}</span>
+                  <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{formatTime12h(booking.start_time)} – {formatTime12h(booking.end_time)}</span>
                 </div>
                 <p className="mt-2 text-xs text-muted-foreground">Espacio: {unit?.name}</p>
 
