@@ -20,6 +20,16 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 const clientNav = [
   { label: 'Inicio', icon: Home, path: '/' },
@@ -53,6 +63,20 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [logoutDialogOpen, setLogoutDialogOpen] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  const handleConfirmLogout = async () => {
+    setLoggingOut(true);
+    try {
+      await logout();
+    } finally {
+      setLoggingOut(false);
+      setLogoutDialogOpen(false);
+      setSheetOpen(false);
+      navigate('/login');
+    }
+  };
 
   const navItems = useMemo(() => {
     if (!isAdminLevel) return clientNav;
@@ -118,10 +142,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       })}
 
       <button
-        onClick={() => {
-          logout();
-          navigate('/login');
-        }}
+        onClick={() => setLogoutDialogOpen(true)}
         className="mt-auto flex items-center gap-3 rounded-2xl px-3 py-3 text-sm font-medium text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
       >
         <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-muted">
@@ -158,6 +179,31 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
         <main className="flex-1 p-4 md:p-6 lg:p-8">{children}</main>
       </div>
+
+      <AlertDialog open={logoutDialogOpen} onOpenChange={(open) => !loggingOut && setLogoutDialogOpen(open)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Cerrar sesión?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tu sesión se cerrará en este dispositivo. Tendrás que volver a iniciar sesión para reservar o administrar.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={loggingOut}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                void handleConfirmLogout();
+              }}
+              disabled={loggingOut}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              <LogOut className="mr-2 h-4 w-4" />
+              {loggingOut ? 'Cerrando sesión...' : 'Cerrar sesión'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

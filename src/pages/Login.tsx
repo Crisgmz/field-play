@@ -145,7 +145,20 @@ export default function Login() {
           {verificationEmail ? (
             <VerifyEmailCode
               email={verificationEmail}
-              onVerified={() => {
+              onVerified={async () => {
+                // Si todavía tenemos el password en memoria (vino de un intento
+                // de login previo), auto-relogeamos para evitar que el usuario
+                // tenga que reingresarlo. Si no, volvemos al form normal.
+                if (password) {
+                  setSubmitting(true);
+                  const retry = await login({ email: verificationEmail, password });
+                  setSubmitting(false);
+                  if (retry.ok) {
+                    setVerificationEmail(null);
+                    navigate(retry.isAdminLevel ? '/admin/overview' : '/');
+                    return;
+                  }
+                }
                 setVerificationEmail(null);
                 toast.success('Cuenta verificada. Ingresa tu contraseña para continuar.');
               }}
@@ -153,50 +166,51 @@ export default function Login() {
             />
           ) : (
             <>
-          <h2 className="font-heading text-2xl font-bold text-foreground">Iniciar sesión</h2>
-          <p className="mt-1 text-sm text-muted-foreground">Accede a tu cuenta para reservar o administrar.</p>
+              <h2 className="font-heading text-2xl font-bold text-foreground">Iniciar sesión</h2>
+              <p className="mt-1 text-sm text-muted-foreground">Accede a tu cuenta para reservar o administrar.</p>
 
-          <form onSubmit={handleSubmit} className="mt-8 space-y-5">
-            <div className="space-y-2">
-              <Label htmlFor="email">Correo</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="usuario@realplay.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">Contraseña</Label>
-              <div className="relative">
-                <Input
-                  id="password"
-                  type={showPw ? 'text' : 'password'}
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPw(!showPw)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                >
-                  {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
-            </div>
-            <Button type="submit" className="w-full" disabled={submitting}>
-              {submitting ? 'Entrando...' : 'Entrar'}
-            </Button>
-          </form>
+              <form onSubmit={handleSubmit} className="mt-8 space-y-5">
+                <div className="space-y-2">
+                  <Label htmlFor="email">Correo</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder="usuario@realplay.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="password">Contraseña</Label>
+                  <div className="relative">
+                    <Input
+                      id="password"
+                      type={showPw ? 'text' : 'password'}
+                      placeholder="••••••••"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPw(!showPw)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                      aria-label={showPw ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                    >
+                      {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </div>
+                <Button type="submit" className="w-full" disabled={submitting}>
+                  {submitting ? 'Entrando...' : 'Entrar'}
+                </Button>
+              </form>
 
-          <p className="mt-6 text-center text-sm text-muted-foreground">
-            ¿No tienes cuenta?{' '}
-            <Link to="/register" className="font-medium text-primary hover:underline">Crear cuenta</Link>
-          </p>
+              <p className="mt-6 text-center text-sm text-muted-foreground">
+                ¿No tienes cuenta?{' '}
+                <Link to="/register" className="font-medium text-primary hover:underline">Crear cuenta</Link>
+              </p>
             </>
           )}
         </div>
