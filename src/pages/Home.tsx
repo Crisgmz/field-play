@@ -1,12 +1,13 @@
 import { useMemo, useState } from 'react';
 import ClubCard from '@/components/ClubCard';
 import HeroSearchBar, { HeroSearchValue } from '@/components/HeroSearchBar';
+import { ClubGridSkeleton } from '@/components/skeletons';
 import { useAppData } from '@/contexts/AppDataContext';
 import { FieldType } from '@/types';
 import { getAvailableTimeSlotsV2 } from '@/lib/availability';
 
 export default function Home() {
-  const { clubs, fields, bookings, blocks, getVenueConfig } = useAppData();
+  const { clubs, fields, bookings, blocks, getVenueConfig, loading } = useAppData();
   const [filters, setFilters] = useState<HeroSearchValue>({ location: '', date: '', gameType: '' });
 
   const locations = useMemo(() => {
@@ -79,19 +80,25 @@ export default function Home() {
             <div>
               <h2 className="font-heading text-xl font-bold text-foreground">Clubes disponibles</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                {filtered.length === 1 ? '1 club encontrado' : `${filtered.length} clubes encontrados`}
+                {loading
+                  ? 'Cargando...'
+                  : filtered.length === 1
+                    ? '1 club encontrado'
+                    : `${filtered.length} clubes encontrados`}
               </p>
             </div>
           </div>
 
-          {filtered.length === 0 ? (
+          {loading ? (
+            <ClubGridSkeleton count={6} />
+          ) : filtered.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-border bg-card py-12 text-center">
               <p className="text-sm text-muted-foreground">
                 No encontramos clubes con esos filtros. Prueba ajustar la búsqueda.
               </p>
             </div>
           ) : (
-            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid animate-fade-in gap-5 sm:grid-cols-2 lg:grid-cols-3">
               {filtered.map((club) => (
                 <ClubCard
                   key={club.id}

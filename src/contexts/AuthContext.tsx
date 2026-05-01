@@ -179,11 +179,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     bootstrap();
 
-    const { data: listener } = supabase.auth.onAuthStateChange(async (_event: AuthChangeEvent, session: Session | null) => {
+    const { data: listener } = supabase.auth.onAuthStateChange(async (event: AuthChangeEvent, session: Session | null) => {
+      // Solo limpiamos el user en sign-out explícito. Para los demás eventos
+      // (TOKEN_REFRESHED, USER_UPDATED, INITIAL_SESSION, SIGNED_IN) cargamos
+      // el profile, pero si la query falla NO borramos el user: mantenemos
+      // el estado actual para no kickear a un usuario válido cuya red está
+      // lenta (eso era el bug "el sistema me saca de la sesión").
+      if (event === 'SIGNED_OUT' || !session) {
+        if (mounted) {
+          setUser(null);
+          window.clearTimeout(watchdogId);
+          setLoading(false);
+        }
+        return;
+      }
+
       try {
         const profile = await loadProfile(session);
         if (!mounted) return;
-        setUser(profile);
+        if (profile) {
+          setUser(profile);
+        } else {
+          // loadProfile falló (timeout o RLS). Logueamos pero NO limpiamos
+          // el user — Supabase tiene la sesión, mantenemos lo que sabíamos.
+          console.warn(`Auth event "${event}": loadProfile devolvió null. Manteniendo user previo.`);
+        }
       } catch (err) {
         console.error('Auth state change error:', err);
       } finally {

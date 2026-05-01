@@ -3,6 +3,7 @@ import { Images, X } from 'lucide-react';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { ClubImage } from '@/types';
 import { useAppData } from '@/contexts/AppDataContext';
+import FadeInImage from '@/components/FadeInImage';
 
 interface Props {
   clubId: string;
@@ -45,11 +46,10 @@ export default function ClubGallery({ clubId, fallbackInitial }: Props) {
           onClick={() => openAt(0)}
           className="group relative h-full w-full overflow-hidden rounded-2xl bg-muted sm:rounded-l-3xl"
         >
-          <img
+          <FadeInImage
             src={getClubImageUrl(main)}
             alt={main.caption ?? ''}
             className="h-full w-full object-cover transition-transform group-hover:scale-105"
-            loading="lazy"
           />
         </button>
 
@@ -63,11 +63,10 @@ export default function ClubGallery({ clubId, fallbackInitial }: Props) {
                 onClick={() => openAt(idx + 1)}
                 className="group relative h-full w-full overflow-hidden rounded-2xl bg-muted last:rounded-br-3xl"
               >
-                <img
+                <FadeInImage
                   src={getClubImageUrl(image)}
                   alt={image.caption ?? ''}
                   className="h-full w-full object-cover transition-transform group-hover:scale-105"
-                  loading="lazy"
                 />
                 {isLast && (
                   <div className="absolute inset-0 flex items-center justify-center bg-black/55 text-white">

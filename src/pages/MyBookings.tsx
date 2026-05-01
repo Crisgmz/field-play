@@ -6,12 +6,13 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/supabase';
 import { Booking } from '@/types';
+import { BookingsListSkeleton } from '@/components/skeletons';
 
 const ACCEPTED_PROOF_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
 const MAX_PROOF_SIZE_BYTES = 10 * 1024 * 1024;
 
 export default function MyBookings() {
-  const { bookings, clubs, fields, cancelBooking, replacePaymentProof, evaluateCancellation } = useAppData();
+  const { bookings, clubs, fields, cancelBooking, replacePaymentProof, evaluateCancellation, loading } = useAppData();
   const { user } = useAuth();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [cancelDialog, setCancelDialog] = useState<Booking | null>(null);
@@ -102,10 +103,12 @@ export default function MyBookings() {
         <p>Política de cancelación: con más de 24h de anticipación calificas para reembolso. Cancelaciones con menos de 24h o no-shows no son reembolsables.</p>
       </div>
 
-      {userBookings.length === 0 ? (
+      {loading ? (
+        <BookingsListSkeleton count={3} />
+      ) : userBookings.length === 0 ? (
         <p className="py-10 text-center text-sm text-muted-foreground">Todavía no tienes reservas.</p>
       ) : (
-        <div className="space-y-3">
+        <div className="animate-fade-in space-y-3">
           {userBookings.map((booking) => {
             const field = fields.find((f) => f.units.some((u) => u.id === booking.field_unit_id));
             const unit = field?.units.find((u) => u.id === booking.field_unit_id);

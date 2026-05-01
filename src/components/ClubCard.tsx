@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useMemo, useState } from 'react';
 import { useAppData } from '@/contexts/AppDataContext';
 import { getAvailableTimeSlotsV2 } from '@/lib/availability';
+import FadeInImage from '@/components/FadeInImage';
 
 interface Props {
   club: Club;
@@ -101,7 +102,7 @@ export default function ClubCard({ club, preselectedType }: Props) {
         style={{ background: heroImage ? undefined : pickGradient(club.id) }}
       >
         {heroImage && (
-          <img src={heroImage} alt={club.name} className="h-full w-full object-cover" loading="lazy" />
+          <FadeInImage src={heroImage} alt={club.name} className="h-full w-full object-cover" />
         )}
         {!heroImage && (
           <div className="flex h-full w-full items-center justify-center text-5xl text-white/90">⚽</div>

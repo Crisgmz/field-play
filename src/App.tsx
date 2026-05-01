@@ -14,13 +14,32 @@ import MyBookings from "@/pages/MyBookings";
 import Profile from "@/pages/Profile";
 import AdminDashboard from "@/pages/AdminDashboard";
 import NotFound from "./pages/NotFound";
+import logoUrl from "@/logos/logo.png";
 
 const queryClient = new QueryClient();
 
 function LoadingScreen() {
   return (
-    <div className="flex h-screen w-full items-center justify-center">
-      <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+    <div className="flex h-screen w-full flex-col items-center justify-center gap-6 bg-background">
+      <div className="relative">
+        <img
+          src={logoUrl}
+          alt="RealPlay"
+          className="h-20 w-auto animate-fade-in object-contain opacity-90"
+        />
+        <div
+          className="absolute -inset-3 animate-pulse rounded-full"
+          style={{
+            background:
+              "radial-gradient(circle, hsl(var(--primary) / 0.18) 0%, transparent 70%)",
+          }}
+        />
+      </div>
+      <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-muted-foreground">
+        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-primary [animation-delay:-0.3s]" />
+        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-primary [animation-delay:-0.15s]" />
+        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-primary" />
+      </div>
     </div>
   );
 }
@@ -41,14 +60,19 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 }
 
 function AppRoutes() {
-  const { user, loading } = useAuth();
+  const { user, isAdminLevel, loading } = useAuth();
 
   if (loading) return <LoadingScreen />;
 
+  // Para usuarios autenticados, su "home" depende del rol. Esto evita
+  // el flicker post-login: el route guard de /login ya redirige al
+  // panel correcto en vez de pasar primero por '/'.
+  const authenticatedHome = isAdminLevel ? '/admin/overview' : '/';
+
   return (
     <Routes>
-      <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
-      <Route path="/register" element={user ? <Navigate to="/" replace /> : <Register />} />
+      <Route path="/login" element={user ? <Navigate to={authenticatedHome} replace /> : <Login />} />
+      <Route path="/register" element={user ? <Navigate to={authenticatedHome} replace /> : <Register />} />
       <Route path="/" element={<ProtectedRoute><Home /></ProtectedRoute>} />
       <Route path="/clubs/:clubId" element={<ProtectedRoute><BookingFlow /></ProtectedRoute>} />
       <Route path="/clubs/:clubId/book" element={<ProtectedRoute><BookingFlow /></ProtectedRoute>} />

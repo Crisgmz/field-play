@@ -19,6 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useAppData } from '@/contexts/AppDataContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { formatCurrency } from '@/lib/bookingFormat';
+import { ChartCardSkeleton, KpiRowSkeleton } from '@/components/skeletons';
 import {
   bookingsForClub,
   computeBlockBreakdown,
@@ -40,7 +41,7 @@ const MODALITY_COLORS: Record<string, string> = {
 
 export default function ReportsSection() {
   const { user } = useAuth();
-  const { clubs, fields, bookings, blocks, profiles, getVenueConfig } = useAppData();
+  const { clubs, fields, bookings, blocks, profiles, getVenueConfig, loading } = useAppData();
 
   // Filtros
   const ownedClubs = useMemo(
@@ -136,8 +137,27 @@ export default function ReportsSection() {
     return `${fmt(start)} – ${fmt(end)}`;
   };
 
+  if (loading && bookings.length === 0) {
+    return (
+      <div className="space-y-6">
+        <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="h-10 w-44 animate-shimmer rounded-md bg-[length:200%_100%] bg-[linear-gradient(90deg,hsl(var(--muted))_0%,hsl(var(--muted-foreground)/0.15)_50%,hsl(var(--muted))_100%)]" />
+            <div className="h-10 w-44 animate-shimmer rounded-md bg-[length:200%_100%] bg-[linear-gradient(90deg,hsl(var(--muted))_0%,hsl(var(--muted-foreground)/0.15)_50%,hsl(var(--muted))_100%)]" />
+          </div>
+        </div>
+        <KpiRowSkeleton count={4} />
+        <ChartCardSkeleton height={280} />
+        <div className="grid gap-4 md:grid-cols-2">
+          <ChartCardSkeleton height={240} />
+          <ChartCardSkeleton height={240} />
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-6">
+    <div className="animate-fade-in space-y-6">
       {/* Filtros */}
       <div className="flex flex-wrap items-end gap-3 rounded-2xl border border-border bg-card p-4 shadow-sm">
         {ownedClubs.length > 1 && (

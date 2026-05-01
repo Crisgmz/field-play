@@ -39,6 +39,7 @@ import AdminWeekCalendar from '@/components/AdminWeekCalendar';
 import ReportsSection from '@/components/ReportsSection';
 import AdminCreateBookingDialog from '@/components/AdminCreateBookingDialog';
 import { formatBlockType, formatBookingDate, formatBookingStatus, formatCurrency, getStatusTone } from '@/lib/bookingFormat';
+import { KpiRowSkeleton, TableRowSkeleton } from '@/components/skeletons';
 import { Settings } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
@@ -89,6 +90,7 @@ export default function AdminDashboard() {
     updateVenueConfig,
     toggleFieldUnit,
     profiles,
+    loading: appLoading,
   } = useAppData();
 
   const currentSection: AdminSection = adminSections.includes((section as AdminSection) || 'overview')
@@ -522,8 +524,25 @@ export default function AdminDashboard() {
   const renderSection = () => {
     switch (currentSection) {
       case 'overview':
+        if (appLoading && bookings.length === 0) {
+          return (
+            <div className="space-y-8">
+              <KpiRowSkeleton count={6} />
+              <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
+                <div className="border-b border-border px-5 py-4">
+                  <h2 className="font-heading text-lg font-bold text-foreground">Últimas reservas</h2>
+                </div>
+                <table className="w-full text-sm">
+                  <tbody>
+                    {Array.from({ length: 5 }).map((_, i) => <TableRowSkeleton key={i} cols={5} />)}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          );
+        }
         return (
-          <div className="space-y-8">
+          <div className="animate-fade-in space-y-8">
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
               {stats.map((stat) => (
                 <div key={stat.label} className={`rounded-2xl border p-5 shadow-sm ${
