@@ -505,25 +505,49 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       'profiles',
     ];
 
-    let channel = supabase.channel('app-data-realtime');
-    tables.forEach((table) => {
-      channel = channel.on(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        'postgres_changes' as any,
-        { event: '*', schema: 'public', table },
-        (payload: { eventType?: string; new?: Record<string, unknown> }) => {
-          if (table === 'bookings' && payload.eventType === 'INSERT') {
-            handleBookingInsert(payload);
-          }
-          debouncedReload();
-        },
-      );
-    });
-    channel.subscribe();
+    // Blindamos la creación + suscripción del canal con try/catch.
+    // Si Supabase Realtime falla por la razón que sea (red, migración 013
+    // no aplicada, etc.) NO debe crashear el provider — el resto de la
+    // app sigue funcionando con el reload manual de cada acción.
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    try {
+      channel = supabase.channel('app-data-realtime');
+      tables.forEach((table) => {
+        channel = channel!.on(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          'postgres_changes' as any,
+          { event: '*', schema: 'public', table },
+          (payload: { eventType?: string; new?: Record<string, unknown> }) => {
+            try {
+              if (table === 'bookings' && payload.eventType === 'INSERT') {
+                handleBookingInsert(payload);
+              }
+              debouncedReload();
+            } catch (err) {
+              console.error('Realtime payload handler error:', err);
+            }
+          },
+        );
+      });
+      channel.subscribe((status) => {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          console.warn('Realtime channel status:', status);
+        }
+      });
+    } catch (err) {
+      console.error('No se pudo crear el canal Realtime (la app sigue funcionando con reload manual):', err);
+      channel = null;
+    }
 
     return () => {
       if (timeout) clearTimeout(timeout);
-      void supabase.removeChannel(channel);
+      if (channel) {
+        try {
+          void supabase.removeChannel(channel);
+        } catch (err) {
+          console.error('Error removiendo canal Realtime:', err);
+        }
+      }
     };
   }, [user?.id, isAdmin, isStaff, staffClubId]);
 

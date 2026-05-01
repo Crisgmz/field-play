@@ -60,6 +60,12 @@ function durationInSlots(start: string, end: string): number {
   return Math.max(1, endIdx - startIdx);
 }
 
+interface ConflictRange {
+  startIdx: number;
+  endIdx: number;
+  reason: string;
+}
+
 interface ColumnData {
   unitId: string;
   unitName: string;
@@ -68,6 +74,14 @@ interface ColumnData {
   // Bookings + blocks ya filtrados a esta unidad para la fecha actual.
   bookingsHere: Booking[];
   blocksHere: Block[];
+  // Rangos donde esta unidad NO se puede reservar porque otra unidad
+  // del mismo field (que comparte slot físico) ya está ocupada.
+  // Ej: si C1 (S1) está bloqueada → F7_1 (S1+S4) y F11 (S1-S6) tienen
+  //     un conflict range a la hora del bloqueo.
+  conflictRanges: ConflictRange[];
+  // Set de índices de TIME_SLOTS que caen dentro de algún conflict range,
+  // para chequear rápido si un click cae en zona bloqueada.
+  conflictedTimeIdx: Set<number>;
 }
 
 export default function AdminDailyCalendar({
@@ -93,16 +107,71 @@ export default function AdminDailyCalendar({
             return a.name.localeCompare(b.name);
           });
 
+        // Bookings y blocks del field para este día (cualquier unidad).
+        const fieldBookingsToday = bookings.filter(
+          (b) => b.date === date && b.status !== 'cancelled' &&
+            field.units.some((u) => u.id === b.field_unit_id),
+        );
+        const fieldBlocksToday = blocks.filter(
+          (b) => b.field_id === field.id && b.date === date,
+        );
+
         orderedUnits.forEach((unit) => {
-          const bookingsHere = bookings.filter(
-            (b) => b.field_unit_id === unit.id && b.date === date && b.status !== 'cancelled',
-          );
-          const blocksHere = blocks.filter(
-            (b) =>
-              b.field_id === field.id &&
-              b.date === date &&
-              b.field_unit_ids.includes(unit.id),
-          );
+          const bookingsHere = fieldBookingsToday.filter((b) => b.field_unit_id === unit.id);
+          const blocksHere = fieldBlocksToday.filter((b) => b.field_unit_ids.includes(unit.id));
+
+          // Calcular rangos de conflicto: bookings/blocks de OTRAS unidades
+          // del field cuyas slots se solapan con las de esta unidad.
+          const requiredSlots = new Set(unit.slot_ids);
+          const conflictRanges: ConflictRange[] = [];
+
+          fieldBookingsToday
+            .filter((b) => b.field_unit_id !== unit.id)
+            .forEach((b) => {
+              const otherUnit = field.units.find((u) => u.id === b.field_unit_id);
+              if (!otherUnit) return;
+              const sharesSlot = otherUnit.slot_ids.some((s) => requiredSlots.has(s));
+              if (!sharesSlot) return;
+              const sIdx = TIME_SLOTS.indexOf(b.start_time);
+              const eIdx = TIME_SLOTS.indexOf(b.end_time);
+              if (sIdx >= 0 && eIdx > sIdx) {
+                conflictRanges.push({
+                  startIdx: sIdx,
+                  endIdx: eIdx,
+                  reason: `Reservado en ${otherUnit.name} (comparte espacio físico)`,
+                });
+              }
+            });
+
+          fieldBlocksToday
+            .filter((b) => !b.field_unit_ids.includes(unit.id))
+            .forEach((b) => {
+              const blockedUnits = b.field_unit_ids
+                .map((id) => field.units.find((u) => u.id === id))
+                .filter(Boolean) as typeof field.units;
+              const sharesSlot = blockedUnits.some((bu) =>
+                bu.slot_ids.some((s) => requiredSlots.has(s)),
+              );
+              if (!sharesSlot) return;
+              const sIdx = TIME_SLOTS.indexOf(b.start_time);
+              const eIdx = TIME_SLOTS.indexOf(b.end_time);
+              if (sIdx >= 0 && eIdx > sIdx) {
+                conflictRanges.push({
+                  startIdx: sIdx,
+                  endIdx: eIdx,
+                  reason: `Bloqueado por otra cancha que comparte espacio: ${b.reason}`,
+                });
+              }
+            });
+
+          // Set de índices conflictivos para chequeo O(1) en el click.
+          const conflictedTimeIdx = new Set<number>();
+          conflictRanges.forEach((r) => {
+            for (let i = r.startIdx; i < r.endIdx; i += 1) {
+              conflictedTimeIdx.add(i);
+            }
+          });
+
           cols.push({
             unitId: unit.id,
             unitName: unit.name,
@@ -110,6 +179,8 @@ export default function AdminDailyCalendar({
             fieldName: field.name,
             bookingsHere,
             blocksHere,
+            conflictRanges,
+            conflictedTimeIdx,
           });
         });
       });
@@ -186,22 +257,65 @@ export default function AdminDailyCalendar({
                 key={col.unitId}
                 className={`relative border-l border-border ${isToday ? 'bg-primary/5' : ''}`}
               >
-                {/* Background grid de slots clickeables */}
-                {TIME_SLOTS.slice(0, -1).map((time, idx) => (
-                  <button
-                    key={time}
-                    type="button"
-                    onClick={() => onSlotClick(col.unitId, time)}
-                    className={`block w-full cursor-pointer border-b transition-colors hover:bg-primary/10 ${
-                      idx % 2 === 0 ? 'border-border/70' : 'border-border/40'
-                    }`}
-                    style={{ height: SLOT_HEIGHT }}
-                    title={`Crear reserva en ${col.unitName} a las ${formatTime12h(time)}`}
-                    aria-label={`Crear reserva en ${col.unitName} a las ${formatTime12h(time)}`}
-                  />
-                ))}
+                {/* Background grid de slots clickeables. Si el slot cae en
+                    un rango de conflicto (otra cancha del field comparte
+                    espacio físico), se renderiza no-clickeable. */}
+                {TIME_SLOTS.slice(0, -1).map((time, idx) => {
+                  const isConflicted = col.conflictedTimeIdx.has(idx);
+                  if (isConflicted) {
+                    return (
+                      <div
+                        key={time}
+                        className={`block w-full border-b ${
+                          idx % 2 === 0 ? 'border-border/70' : 'border-border/40'
+                        }`}
+                        style={{ height: SLOT_HEIGHT }}
+                      />
+                    );
+                  }
+                  return (
+                    <button
+                      key={time}
+                      type="button"
+                      onClick={() => onSlotClick(col.unitId, time)}
+                      className={`block w-full cursor-pointer border-b transition-colors hover:bg-primary/10 ${
+                        idx % 2 === 0 ? 'border-border/70' : 'border-border/40'
+                      }`}
+                      style={{ height: SLOT_HEIGHT }}
+                      title={`Crear reserva en ${col.unitName} a las ${formatTime12h(time)}`}
+                      aria-label={`Crear reserva en ${col.unitName} a las ${formatTime12h(time)}`}
+                    />
+                  );
+                })}
                 {/* Última fila como visual filler */}
                 <div className="border-b border-border/40" style={{ height: SLOT_HEIGHT }} />
+
+                {/* Overlay de conflictos: rayado gris claro indicando que
+                    esa zona está ocupada por una unidad hermana que
+                    comparte espacio físico. No clickeable. */}
+                {col.conflictRanges.map((range, i) => {
+                  const top = range.startIdx * SLOT_HEIGHT;
+                  const height = (range.endIdx - range.startIdx) * SLOT_HEIGHT - 2;
+                  return (
+                    <Tooltip key={`conflict-${i}-${range.startIdx}`}>
+                      <TooltipTrigger asChild>
+                        <div
+                          className="pointer-events-auto absolute left-1 right-1 cursor-not-allowed rounded-md border border-dashed border-zinc-400/60 bg-white/40"
+                          style={{
+                            top,
+                            height,
+                            backgroundImage:
+                              'repeating-linear-gradient(45deg, rgba(0,0,0,0) 0 6px, rgba(0,0,0,0.06) 6px 12px)',
+                          }}
+                          aria-label="No disponible por conflicto"
+                        />
+                      </TooltipTrigger>
+                      <TooltipContent side="right" className="max-w-xs">
+                        <p className="text-xs">{range.reason}</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  );
+                })}
 
                 {/* Bookings posicionados absolutamente sobre la columna */}
                 {col.bookingsHere.map((booking) => {
@@ -335,8 +449,15 @@ export default function AdminDailyCalendar({
             />
             Bloqueo
           </span>
+          <span className="flex items-center gap-1.5">
+            <span
+              className="h-2.5 w-2.5 rounded-md border border-dashed border-zinc-400 bg-white"
+              style={{ backgroundImage: 'repeating-linear-gradient(45deg, rgba(0,0,0,0) 0 2px, rgba(0,0,0,0.1) 2px 4px)' }}
+            />
+            En conflicto
+          </span>
           <span className="ml-auto opacity-70">
-            Click en un slot vacío para crear una reserva. Hover sobre una reserva para ver detalles.
+            Click en un slot vacío para crear una reserva. Hover para ver detalles.
           </span>
         </div>
       </div>
