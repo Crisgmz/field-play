@@ -96,7 +96,18 @@ export default function ClubCard({ club, preselectedType }: Props) {
   };
 
   return (
-    <article className="group flex flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md">
+    <article
+      role="button"
+      tabIndex={0}
+      onClick={handleNavigate}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          handleNavigate();
+        }
+      }}
+      className="group flex cursor-pointer flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+    >
       <div
         className="relative aspect-[16/10] w-full"
         style={{ background: heroImage ? undefined : pickGradient(club.id) }}
@@ -175,7 +186,10 @@ export default function ClubCard({ club, preselectedType }: Props) {
           </div>
           <button
             type="button"
-            onClick={handleNavigate}
+            onClick={(event) => {
+              event.stopPropagation();
+              handleNavigate();
+            }}
             className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-primary hover:text-primary-foreground"
           >
             <CalendarCheck className="h-3.5 w-3.5" />

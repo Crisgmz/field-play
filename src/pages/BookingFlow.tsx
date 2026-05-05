@@ -655,6 +655,10 @@ export default function BookingFlow() {
                       </p>
                     )}
                   </div>
+
+                  <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
+                    <strong>Importante:</strong> si no completas el pago antes de tu hora reservada, el club puede liberar el espacio.
+                  </div>
                 </div>
               ) : (
                 <div className="rounded-3xl border border-primary/20 bg-card p-5 shadow-sm">
@@ -693,9 +697,6 @@ export default function BookingFlow() {
                     )}
                   </div>
 
-                  <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
-                    <strong>Importante:</strong> si no completas el pago antes de tu hora reservada, el club puede liberar el espacio.
-                  </div>
                 </div>
               )}
 

@@ -1124,7 +1124,7 @@ export default function AdminDashboard() {
               </DialogContent>
             </Dialog>
             <div className="grid gap-3 md:hidden">
-              {bookings.map((booking) => {
+              {latestBookings.map((booking) => {
                 const isUnseen = !booking.admin_seen_at && booking.status === 'pending';
                 const isConfirmed = booking.status === 'confirmed';
                 const statusLabel = booking.status === 'confirmed' ? 'Confirmada' : booking.status === 'cancelled' ? 'Cancelada' : 'Pendiente';
@@ -1181,7 +1181,7 @@ export default function AdminDashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {bookings.map((booking) => {
+                    {latestBookings.map((booking) => {
                       const isUnseen = !booking.admin_seen_at && booking.status === 'pending';
                       const isConfirmed = booking.status === 'confirmed';
                       const statusLabel = booking.status === 'confirmed' ? 'Confirmada' : booking.status === 'cancelled' ? 'Cancelada' : 'Pendiente';

@@ -20,7 +20,10 @@ export default function MyBookings() {
   const [cancelReason, setCancelReason] = useState('');
   const [proofUrls, setProofUrls] = useState<Record<string, string>>({});
 
-  const userBookings = bookings.filter((booking) => booking.user_id === user?.id);
+  const userBookings = bookings
+    .filter((booking) => booking.user_id === user?.id)
+    .slice()
+    .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
 
   const openProof = async (booking: Booking) => {
     if (!booking.payment_proof_path) return;
