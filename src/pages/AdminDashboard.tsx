@@ -41,7 +41,7 @@ import AdminDailyCalendar from '@/components/AdminDailyCalendar';
 import ReportsSection from '@/components/ReportsSection';
 import AdminCreateBookingDialog, { type AdminCreateBookingInitialValues } from '@/components/AdminCreateBookingDialog';
 import EditBookingDialog from '@/components/EditBookingDialog';
-import { formatBlockType, formatBookingDate, formatBookingStatus, formatCurrency, formatTime12h, getStatusTone } from '@/lib/bookingFormat';
+import { formatBlockType, formatBookingDate, formatBookingStatus, formatCurrency, formatPaymentMethod, formatTime12h, getStatusTone } from '@/lib/bookingFormat';
 import { KpiRowSkeleton, TableRowSkeleton } from '@/components/skeletons';
 import { useDialogBackButton } from '@/hooks/useDialogBackButton';
 import { Settings } from 'lucide-react';
@@ -991,7 +991,7 @@ export default function AdminDashboard() {
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                       <div className="rounded-xl border border-border p-3"><p className="text-xs text-muted-foreground">Tipo</p><p className="mt-1 font-semibold text-foreground">{selectedBooking.field_type}</p></div>
-                      <div className="rounded-xl border border-border p-3"><p className="text-xs text-muted-foreground">Estado</p><p className="mt-1 font-semibold text-foreground">{selectedBooking.status}</p></div>
+                      <div className="rounded-xl border border-border p-3"><p className="text-xs text-muted-foreground">Estado</p><p className="mt-1 font-semibold text-foreground">{formatBookingStatus(selectedBooking.status)}</p></div>
                       <div className="rounded-xl border border-border p-3"><p className="text-xs text-muted-foreground">Fecha</p><p className="mt-1 font-semibold text-foreground">{selectedBooking.date}</p></div>
                       <div className="rounded-xl border border-border p-3"><p className="text-xs text-muted-foreground">Hora</p><p className="mt-1 font-semibold text-foreground">{formatTime12h(selectedBooking.start_time)} – {formatTime12h(selectedBooking.end_time)}</p></div>
                     </div>
@@ -1003,7 +1003,7 @@ export default function AdminDashboard() {
                     {selectedBooking.payment_method && (
                       <div className="rounded-xl border border-border p-3">
                         <p className="text-xs text-muted-foreground">Método de pago</p>
-                        <p className="mt-1 font-semibold text-foreground">Transferencia o depósito bancario</p>
+                        <p className="mt-1 font-semibold text-foreground">{formatPaymentMethod(selectedBooking.payment_method)}</p>
                       </div>
                     )}
 
