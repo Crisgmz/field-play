@@ -663,38 +663,62 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     // Si Supabase Realtime falla por la razón que sea (red, migración 013
     // no aplicada, etc.) NO debe crashear el provider — el resto de la
     // app sigue funcionando con el reload manual de cada acción.
+    // En producción se ha visto que la WebSocket de Realtime se
+    // autentica con el token viejo (o sin token) cuando loadProfile
+    // tarda. Esto produce SUBSCRIBED pero sin eventos porque RLS
+    // bloquea. Hacemos setAuth ANTES de subscribe — el flujo entero
+    // espera la sesión actual.
     let channel: ReturnType<typeof supabase.channel> | null = null;
-    try {
-      channel = supabase.channel('app-data-realtime');
-      tables.forEach((table) => {
-        channel = channel!.on(
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          'postgres_changes' as any,
-          { event: '*', schema: 'public', table },
-          (payload: { eventType?: string; new?: Record<string, unknown> }) => {
-            try {
-              if (table === 'bookings' && payload.eventType === 'INSERT') {
-                handleBookingInsert(payload);
-              }
-              debouncedReload();
-            } catch (err) {
-              console.error('Realtime payload handler error:', err);
-            }
-          },
-        );
-      });
-      channel.subscribe((status) => {
-        console.log('[notif] canal realtime status:', status);
-        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-          console.warn('Realtime channel status:', status);
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { data } = await supabase.auth.getSession();
+        if (cancelled) return;
+        const token = data.session?.access_token;
+        if (token) {
+          try {
+            supabase.realtime.setAuth(token);
+            console.log('[notif] realtime.setAuth aplicado');
+          } catch (err) {
+            console.error('[notif] error en realtime.setAuth:', err);
+          }
+        } else {
+          console.warn('[notif] no hay access_token en la sesión');
         }
-      });
-    } catch (err) {
-      console.error('No se pudo crear el canal Realtime (la app sigue funcionando con reload manual):', err);
-      channel = null;
-    }
+
+        if (cancelled) return;
+        channel = supabase.channel('app-data-realtime');
+        tables.forEach((table) => {
+          channel = channel!.on(
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            'postgres_changes' as any,
+            { event: '*', schema: 'public', table },
+            (payload: { eventType?: string; new?: Record<string, unknown> }) => {
+              try {
+                if (table === 'bookings' && payload.eventType === 'INSERT') {
+                  handleBookingInsert(payload);
+                }
+                debouncedReload();
+              } catch (err) {
+                console.error('Realtime payload handler error:', err);
+              }
+            },
+          );
+        });
+        channel.subscribe((status) => {
+          console.log('[notif] canal realtime status:', status);
+          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+            console.warn('Realtime channel status:', status);
+          }
+        });
+      } catch (err) {
+        console.error('No se pudo crear el canal Realtime (la app sigue funcionando con reload manual):', err);
+        channel = null;
+      }
+    })();
 
     return () => {
+      cancelled = true;
       if (timeout) clearTimeout(timeout);
       if (channel) {
         try {
