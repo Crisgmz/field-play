@@ -556,30 +556,54 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     };
 
     const handleBookingInsert = (payload: { new?: Record<string, unknown> }) => {
+      console.log('[notif] INSERT recibido', payload.new);
       const row = payload.new;
-      if (!row || typeof row !== 'object') return;
+      if (!row || typeof row !== 'object') {
+        console.log('[notif] skip: row inválida');
+        return;
+      }
       const id = String(row.id ?? '');
-      if (!id) return;
+      if (!id) {
+        console.log('[notif] skip: sin id');
+        return;
+      }
       // Si ya lo conocemos (fue creado por nosotros y reload lo trajo),
       // no toasteamos.
-      if (knownBookingIdsRef.current.has(id)) return;
+      if (knownBookingIdsRef.current.has(id)) {
+        console.log('[notif] skip: id ya conocido (booking creado por esta sesión)');
+        return;
+      }
       knownBookingIdsRef.current.add(id);
 
       // Solo notificamos a admin/staff. Cliente no necesita toast por
       // reservas que ni le aplican.
-      if (!isAdmin && !isStaff) return;
+      if (!isAdmin && !isStaff) {
+        console.log('[notif] skip: usuario no es admin ni staff', { isAdmin, isStaff });
+        return;
+      }
       const status = String(row.status ?? '');
-      if (status !== 'pending') return;
+      if (status !== 'pending') {
+        console.log('[notif] skip: status no es pending', status);
+        return;
+      }
 
       // Las reservas creadas manualmente por un admin o empleado desde
       // el panel (campo `created_by_admin = true`) no deben disparar
       // notificación — la persona que las creó ya sabe que existen.
       // Solo notificamos cuando un cliente reservó por la web.
-      if (row.created_by_admin === true) return;
+      if (row.created_by_admin === true) {
+        console.log('[notif] skip: creada por admin/staff');
+        return;
+      }
 
       // Para staff: solo si es de su club asignado.
       const bookingClubId = String(row.club_id ?? '');
-      if (isStaff && staffClubId && bookingClubId !== staffClubId) return;
+      if (isStaff && staffClubId && bookingClubId !== staffClubId) {
+        console.log('[notif] skip: club distinto al asignado al staff', { bookingClubId, staffClubId });
+        return;
+      }
+
+      console.log('[notif] disparando popup + sonido');
 
       const fieldType = String(row.field_type ?? '');
       const date = String(row.date ?? '');
@@ -608,16 +632,17 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       // para no spammear errores en consola.
       try {
         if (!notificationAudioRef.current) {
+          console.log('[notif] inicializando audio', notificationSoundUrl);
           notificationAudioRef.current = new Audio(notificationSoundUrl);
           notificationAudioRef.current.preload = 'auto';
           notificationAudioRef.current.volume = 0.6;
         }
         notificationAudioRef.current.currentTime = 0;
-        void notificationAudioRef.current.play().catch(() => {
-          // Autoplay bloqueado por el navegador — silencioso.
-        });
-      } catch {
-        // Audio API no disponible — silencioso.
+        void notificationAudioRef.current.play()
+          .then(() => console.log('[notif] audio reproducido OK'))
+          .catch((err) => console.warn('[notif] audio bloqueado por el browser:', err?.message ?? err));
+      } catch (err) {
+        console.error('[notif] error al reproducir audio:', err);
       }
     };
 
@@ -659,6 +684,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
         );
       });
       channel.subscribe((status) => {
+        console.log('[notif] canal realtime status:', status);
         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
           console.warn('Realtime channel status:', status);
         }
