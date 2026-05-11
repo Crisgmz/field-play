@@ -8,15 +8,19 @@ import {
   CalendarPlus,
   ChevronLeft,
   ChevronRight,
+  CircleDot,
   DollarSign,
   Edit2,
   ExternalLink,
   Info,
   LayoutGrid,
+  Loader2,
+  MoreHorizontal,
   Pencil,
   Plus,
   Save,
   Shield,
+  Target,
   Trash2,
   Users,
   X,
@@ -28,7 +32,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAppData } from '@/contexts/AppDataContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { Block, FieldType } from '@/types';
+import { Block, FieldType, Sport } from '@/types';
 import { TIME_SLOTS } from '@/data/mockData';
 import CourtLayoutPreview from '@/components/CourtLayoutPreview';
 import FieldConfigPanel from '@/components/FieldConfigPanel';
@@ -41,7 +45,7 @@ import AdminDailyCalendar from '@/components/AdminDailyCalendar';
 import ReportsSection from '@/components/ReportsSection';
 import AdminCreateBookingDialog, { type AdminCreateBookingInitialValues } from '@/components/AdminCreateBookingDialog';
 import EditBookingDialog from '@/components/EditBookingDialog';
-import { formatBlockType, formatBookingDate, formatBookingStatus, formatCurrency, formatPaymentMethod, formatTime12h, getStatusTone } from '@/lib/bookingFormat';
+import { formatBlockType, formatBookingDate, formatBookingStatus, formatCurrency, formatPaymentMethod, formatTime12h, getBookingStatusLabel, getBookingStatusTone, getStatusTone } from '@/lib/bookingFormat';
 import { KpiRowSkeleton, TableRowSkeleton } from '@/components/skeletons';
 import { useDialogBackButton } from '@/hooks/useDialogBackButton';
 import { Settings } from 'lucide-react';
@@ -50,15 +54,39 @@ import { supabase } from '@/lib/supabase';
 const adminSections = ['overview', 'calendar', 'bookings', 'blocks', 'reports', 'clubs', 'fields', 'config', 'pricing', 'team'] as const;
 type AdminSection = (typeof adminSections)[number];
 
-// Sections a staff member is allowed to view. Anything outside this set
-// must redirect to the overview when accessed by a staff account.
-const STAFF_ALLOWED_SECTIONS = new Set<AdminSection>(['overview', 'calendar', 'bookings', 'blocks']);
+// Mapeo de secciones admin → permiso requerido. 'overview' y 'calendar'
+// están abiertas a cualquier usuario admin-level (incluyendo todos los
+// sub-roles de staff). El resto se gatea por flag específico.
+type SectionGate =
+  | 'always'
+  | 'canManageBookings'
+  | 'canManageBlocks'
+  | 'canViewReports'
+  | 'canManageClubInfo'
+  | 'canManageFields'
+  | 'canManageVenueConfig'
+  | 'canManagePricing'
+  | 'canManageTeam';
+
+const SECTION_GATES: Record<AdminSection, SectionGate> = {
+  overview: 'always',
+  calendar: 'always',
+  bookings: 'canManageBookings',
+  blocks: 'canManageBlocks',
+  reports: 'canViewReports',
+  clubs: 'canManageClubInfo',
+  fields: 'canManageFields',
+  config: 'canManageVenueConfig',
+  pricing: 'canManagePricing',
+  team: 'canManageTeam',
+};
 
 const layoutLabels = {
   full_11: 'Cancha completa — solo Fútbol 11',
   three_7: '3 canchas de Fútbol 7',
   six_5: '6 mini canchas de Fútbol 5',
   versatile_full: 'Versátil — F11, F7 y F5 (recomendado)',
+  padel_single: 'Cancha de Pádel',
 } as const;
 
 const layoutDescriptions: Record<keyof typeof layoutLabels, string> = {
@@ -66,11 +94,31 @@ const layoutDescriptions: Record<keyof typeof layoutLabels, string> = {
   three_7: 'La cancha se divide en 3 espacios independientes para Fútbol 7. Cada espacio usa 2 zonas.',
   six_5: 'La cancha se divide en 6 mini canchas individuales. Máxima capacidad simultánea.',
   versatile_full: 'Ofrece todas las modalidades: F11 completo, 3 de F7, o 6 de F5. El sistema evita conflictos automáticamente. Más flexibilidad = más ingresos.',
+  padel_single: 'Una cancha individual de pádel. No se subdivide — se reserva entera por hora.',
+};
+
+const layoutSport: Record<keyof typeof layoutLabels, 'soccer' | 'padel'> = {
+  full_11: 'soccer',
+  three_7: 'soccer',
+  six_5: 'soccer',
+  versatile_full: 'soccer',
+  padel_single: 'padel',
 };
 
 export default function AdminDashboard() {
   const { section } = useParams();
-  const { user, isStaff, canManageTeam, canManageClubInfo } = useAuth();
+  const {
+    user,
+    isStaff,
+    canManageBookings: authCanManageBookings,
+    canManageBlocks: authCanManageBlocks,
+    canManagePricing: authCanManagePricing,
+    canManageClubInfo,
+    canManageFields: authCanManageFields,
+    canManageVenueConfig: authCanManageVenueConfig,
+    canManageTeam,
+    canViewReports: authCanViewReports,
+  } = useAuth();
   const navigate = useNavigate();
   const {
     clubs,
@@ -102,17 +150,43 @@ export default function AdminDashboard() {
     : 'overview';
 
   useEffect(() => {
-    if (isStaff && !STAFF_ALLOWED_SECTIONS.has(currentSection)) {
+    if (!isStaff) return;
+    const gate = SECTION_GATES[currentSection];
+    const allowed: Record<SectionGate, boolean> = {
+      always: true,
+      canManageBookings: authCanManageBookings,
+      canManageBlocks: authCanManageBlocks,
+      canViewReports: authCanViewReports,
+      canManageClubInfo,
+      canManageFields: authCanManageFields,
+      canManageVenueConfig: authCanManageVenueConfig,
+      canManagePricing: authCanManagePricing,
+      canManageTeam,
+    };
+    if (!allowed[gate]) {
       toast.error('No tienes permisos para esta sección.');
       navigate('/admin/overview', { replace: true });
     }
-  }, [isStaff, currentSection, navigate]);
+  }, [
+    isStaff,
+    currentSection,
+    navigate,
+    authCanManageBookings,
+    authCanManageBlocks,
+    authCanViewReports,
+    canManageClubInfo,
+    authCanManageFields,
+    authCanManageVenueConfig,
+    authCanManagePricing,
+    canManageTeam,
+  ]);
 
   // Back button del navegador / gesto en mobile cierra el modal en lugar de
   // hacer navigate-back que sacaría al admin de la sección actual.
 
   const [calendarDate, setCalendarDate] = useState(new Date().toISOString().split('T')[0]);
-  const [calendarView, setCalendarView] = useState<'week' | 'day'>('week');
+  const [calendarView, setCalendarView] = useState<'week' | 'day'>('day');
+  const [calendarSport, setCalendarSport] = useState<Sport>('soccer');
   const [selectedMobileCalendarDate, setSelectedMobileCalendarDate] = useState<string | null>(null);
   const [blockDialogOpen, setBlockDialogOpen] = useState(false);
   const [clubDialogOpen, setClubDialogOpen] = useState(false);
@@ -129,6 +203,14 @@ export default function AdminDashboard() {
   const [bookingActionMode, setBookingActionMode] = useState<'idle' | 'reject' | 'cancel-confirmed'>('idle');
   const [bookingActionReason, setBookingActionReason] = useState('');
   const [bookingActionBusy, setBookingActionBusy] = useState(false);
+  // Estados de loading para prevenir doble click en cada acción mutante.
+  // Cada handler envuelve su lógica en un try/finally para garantizar
+  // que el botón se desbloquee aunque la operación falle.
+  const [creatingBlock, setCreatingBlock] = useState(false);
+  const [creatingClub, setCreatingClub] = useState(false);
+  const [updatingClubId, setUpdatingClubId] = useState<string | null>(null);
+  const [creatingField, setCreatingField] = useState(false);
+  const [updatingFieldId, setUpdatingFieldId] = useState<string | null>(null);
 
   // Conectamos los modales más críticos del admin con el back button del
   // navegador. Esto fixea el caso "abro modal de reserva, presiono atrás
@@ -153,6 +235,8 @@ export default function AdminDashboard() {
     phone: '',
     email: '',
     amenities: '',
+    notification_email: '',
+    notification_sender_name: '',
   });
   const [editingFieldId, setEditingFieldId] = useState<string | null>(null);
   const [editFieldForm, setEditFieldForm] = useState({ name: '', surface: '' });
@@ -165,6 +249,14 @@ export default function AdminDashboard() {
   //   'type:F7'       → todas las F7
   //   'type:F5'       → todas las F5
   //   'unit:<uuid>'   → una sola unidad específica (ej. C1, F7_1)
+  // Filtros de la sección "Reservas". El estado del filtro vive aquí
+  // (no en URL) — para queries más permanentes el admin puede usar el
+  // calendario o reportes.
+  const [bookingsStatusFilter, setBookingsStatusFilter] = useState<'all' | 'pending' | 'confirmed' | 'cancelled' | 'auto_expired'>('all');
+  const [bookingsDateFilter, setBookingsDateFilter] = useState<string>(''); // '' = todas las fechas
+  const [bookingsSearch, setBookingsSearch] = useState<string>('');
+  const [bookingsSort, setBookingsSort] = useState<'recent' | 'upcoming' | 'amount'>('recent');
+
   const [blockForm, setBlockForm] = useState({
     field_id: '',
     target: 'all' as string,
@@ -188,6 +280,7 @@ export default function AdminDashboard() {
     priceF5: '3000',
     priceF7: '6000',
     priceF11: '18000',
+    pricePadel: '1500',
   });
 
   const totalRevenue = bookings
@@ -300,10 +393,20 @@ export default function AdminDashboard() {
     return date.toISOString().split('T')[0];
   });
 
+  const calendarFields = useMemo(
+    () => fields.filter((field) => (field.sport ?? 'soccer') === calendarSport),
+    [fields, calendarSport],
+  );
+
+  const calendarUnitIds = useMemo(
+    () => new Set(calendarFields.flatMap((field) => field.units.map((unit) => unit.id))),
+    [calendarFields],
+  );
+
   const getDayEvents = (date: string) => {
     return [
       ...bookings
-        .filter((booking) => booking.date === date)
+        .filter((booking) => booking.date === date && calendarUnitIds.has(booking.field_unit_id))
         .map((booking) => ({
           id: booking.id,
           kind: 'booking' as const,
@@ -312,7 +415,7 @@ export default function AdminDashboard() {
           label: `${booking.field_type} · Reserva`,
         })),
       ...blocks
-        .filter((block) => block.date === date)
+        .filter((block) => block.date === date && (block.field_unit_ids.length === 0 || block.field_unit_ids.some((id) => calendarUnitIds.has(id))))
         .map((block) => ({
           id: block.id,
           kind: 'block' as const,
@@ -325,6 +428,54 @@ export default function AdminDashboard() {
 
   const latestBookings = useMemo(() => bookings.slice().sort((a, b) => (b.created_at || '').localeCompare(a.created_at || '')), [bookings]);
   const newPendingBookings = useMemo(() => bookings.filter((booking) => booking.status === 'pending' && !booking.admin_seen_at), [bookings]);
+
+  // Bookings filtrados para la sección "Reservas" — combina status,
+  // fecha, búsqueda y orden seleccionado por el admin.
+  const filteredBookings = useMemo(() => {
+    const q = bookingsSearch.trim().toLowerCase();
+    return bookings
+      .filter((b) => {
+        // Status filter (auto_expired = cancelled con sentinel AUTO_EXPIRED)
+        if (bookingsStatusFilter === 'auto_expired') {
+          if (b.status !== 'cancelled' || b.cancellation_reason !== 'AUTO_EXPIRED') return false;
+        } else if (bookingsStatusFilter === 'cancelled') {
+          // "Canceladas" excluye las auto-expiradas (esas van en su chip propio)
+          if (b.status !== 'cancelled' || b.cancellation_reason === 'AUTO_EXPIRED') return false;
+        } else if (bookingsStatusFilter !== 'all') {
+          if (b.status !== bookingsStatusFilter) return false;
+        }
+        if (bookingsDateFilter && b.date !== bookingsDateFilter) return false;
+        if (q) {
+          const owner = profiles.find((p) => p.id === b.user_id);
+          const haystack = [
+            b.id,
+            owner?.email,
+            owner ? `${owner.first_name} ${owner.last_name}` : '',
+            owner?.phone,
+          ].join(' ').toLowerCase();
+          if (!haystack.includes(q)) return false;
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        if (bookingsSort === 'recent') return (b.created_at || '').localeCompare(a.created_at || '');
+        if (bookingsSort === 'upcoming') {
+          const dateCmp = a.date.localeCompare(b.date);
+          if (dateCmp !== 0) return dateCmp;
+          return a.start_time.localeCompare(b.start_time);
+        }
+        return b.total_price - a.total_price;
+      });
+  }, [bookings, bookingsStatusFilter, bookingsDateFilter, bookingsSearch, bookingsSort, profiles]);
+
+  // Conteos por estado para los badges en los chips.
+  const bookingsCountByStatus = useMemo(() => ({
+    all: bookings.length,
+    pending: bookings.filter((b) => b.status === 'pending').length,
+    confirmed: bookings.filter((b) => b.status === 'confirmed').length,
+    cancelled: bookings.filter((b) => b.status === 'cancelled' && b.cancellation_reason !== 'AUTO_EXPIRED').length,
+    auto_expired: bookings.filter((b) => b.status === 'cancelled' && b.cancellation_reason === 'AUTO_EXPIRED').length,
+  }), [bookings]);
   const selectedBooking = bookings.find((booking) => booking.id === selectedBookingId) ?? null;
   const bookingOwner = selectedBooking
     ? profiles.find((profile) => profile.id === selectedBooking.user_id) ?? null
@@ -421,6 +572,7 @@ export default function AdminDashboard() {
   };
 
   const handleCreateBlock = async () => {
+    if (creatingBlock) return;
     const field = fields.find((item) => item.id === blockForm.field_id);
     if (!field) return;
 
@@ -447,117 +599,148 @@ export default function AdminDashboard() {
       return;
     }
 
-    const result = await createBlock({
-      field_id: blockForm.field_id,
-      field_unit_ids: unitIds,
-      date: blockForm.date_start,
-      date_end: blockForm.date_end,
-      start_time: blockForm.start_time,
-      end_time: blockForm.end_time,
-      type: blockForm.type,
-      reason: blockForm.reason || 'Bloqueo administrativo',
-    });
+    setCreatingBlock(true);
+    try {
+      const result = await createBlock({
+        field_id: blockForm.field_id,
+        field_unit_ids: unitIds,
+        date: blockForm.date_start,
+        date_end: blockForm.date_end,
+        start_time: blockForm.start_time,
+        end_time: blockForm.end_time,
+        type: blockForm.type,
+        reason: blockForm.reason || 'Bloqueo administrativo',
+      });
 
-    if (!result.ok) {
-      toast.error(result.message);
-      return;
-    }
+      if (!result.ok) {
+        toast.error(result.message);
+        return;
+      }
 
-    setBlockDialogOpen(false);
-    setBlockForm((prev) => ({ ...prev, reason: '' }));
-    if (result.daysCreated > 1) {
-      toast.success(`Bloqueo creado para ${result.daysCreated} días.`);
-    } else {
-      toast.success('Bloqueo creado correctamente.');
+      setBlockDialogOpen(false);
+      setBlockForm((prev) => ({ ...prev, reason: '' }));
+      if (result.daysCreated > 1) {
+        toast.success(`Bloqueo creado para ${result.daysCreated} días.`);
+      } else {
+        toast.success('Bloqueo creado correctamente.');
+      }
+    } finally {
+      setCreatingBlock(false);
     }
   };
 
   const handleCreateClub = async () => {
-    if (!user) return;
+    if (!user || creatingClub) return;
+    setCreatingClub(true);
+    try {
+      const created = await createClub({
+        name: clubForm.name,
+        location: clubForm.location,
+        description: clubForm.description,
+        owner_id: user.id,
+      });
 
-    const created = await createClub({
-      name: clubForm.name,
-      location: clubForm.location,
-      description: clubForm.description,
-      owner_id: user.id,
-    });
+      if (!created) {
+        toast.error('No se pudo crear el club.');
+        return;
+      }
 
-    if (!created) {
-      toast.error('No se pudo crear el club.');
-      return;
+      setClubDialogOpen(false);
+      setClubForm({ name: '', location: '', description: '' });
+      toast.success('Club creado correctamente.');
+    } finally {
+      setCreatingClub(false);
     }
-
-    setClubDialogOpen(false);
-    setClubForm({ name: '', location: '', description: '' });
-    toast.success('Club creado correctamente.');
   };
 
   const handleUpdateClub = async (clubId: string) => {
-    const amenities = editClubForm.amenities
-      .split(',')
-      .map((value) => value.trim())
-      .filter(Boolean);
-    const success = await updateClub({
-      id: clubId,
-      name: editClubForm.name,
-      location: editClubForm.location,
-      description: editClubForm.description,
-      open_time: editClubForm.open_time,
-      close_time: editClubForm.close_time,
-      phone: editClubForm.phone || null,
-      email: editClubForm.email || null,
-      amenities,
-    });
-    if (success) {
-      setEditingClubId(null);
-      toast.success('Club actualizado.');
-    } else {
-      toast.error('Error al actualizar el club.');
+    if (updatingClubId) return;
+    setUpdatingClubId(clubId);
+    try {
+      const amenities = editClubForm.amenities
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean);
+      const success = await updateClub({
+        id: clubId,
+        name: editClubForm.name,
+        location: editClubForm.location,
+        description: editClubForm.description,
+        open_time: editClubForm.open_time,
+        close_time: editClubForm.close_time,
+        phone: editClubForm.phone || null,
+        email: editClubForm.email || null,
+        amenities,
+        notification_email: editClubForm.notification_email.trim() || null,
+        notification_sender_name: editClubForm.notification_sender_name.trim() || null,
+      });
+      if (success) {
+        setEditingClubId(null);
+        toast.success('Club actualizado.');
+      } else {
+        toast.error('Error al actualizar el club.');
+      }
+    } finally {
+      setUpdatingClubId(null);
     }
   };
 
   const handleCreateField = async () => {
-    const created = await createField({
-      club_id: fieldForm.club_id,
-      name: fieldForm.name,
-      surface: fieldForm.surface,
-      layout: fieldForm.layout,
-      prices: {
-        F5: fieldForm.layout === 'six_5' || fieldForm.layout === 'versatile_full' ? Number(fieldForm.priceF5) : undefined,
-        F7: fieldForm.layout === 'three_7' || fieldForm.layout === 'versatile_full' ? Number(fieldForm.priceF7) : undefined,
-        F11: fieldForm.layout === 'full_11' || fieldForm.layout === 'versatile_full' ? Number(fieldForm.priceF11) : undefined,
-      },
-    });
+    if (creatingField) return;
+    setCreatingField(true);
+    try {
+      const created = await createField({
+        club_id: fieldForm.club_id,
+        name: fieldForm.name,
+        surface: fieldForm.surface,
+        layout: fieldForm.layout,
+        prices: {
+          F5: fieldForm.layout === 'six_5' || fieldForm.layout === 'versatile_full' ? Number(fieldForm.priceF5) : undefined,
+          F7: fieldForm.layout === 'three_7' || fieldForm.layout === 'versatile_full' ? Number(fieldForm.priceF7) : undefined,
+          F11: fieldForm.layout === 'full_11' || fieldForm.layout === 'versatile_full' ? Number(fieldForm.priceF11) : undefined,
+          PADEL: fieldForm.layout === 'padel_single' ? Number(fieldForm.pricePadel) : undefined,
+        },
+      });
 
-    if (!created) {
-      toast.error('No se pudo crear el campo.');
-      return;
+      if (!created) {
+        toast.error('No se pudo crear el campo.');
+        return;
+      }
+
+      setFieldDialogOpen(false);
+      setFieldForm({
+        club_id: clubs[0]?.id ?? '',
+        name: '',
+        surface: 'Gramilla sintética',
+        layout: 'versatile_full',
+        priceF5: '3000',
+        priceF7: '6000',
+        priceF11: '18000',
+        pricePadel: '1500',
+      });
+      toast.success('Cancha creada correctamente.');
+    } finally {
+      setCreatingField(false);
     }
-
-    setFieldDialogOpen(false);
-    setFieldForm({
-      club_id: clubs[0]?.id ?? '',
-      name: '',
-      surface: 'Gramilla sintética',
-      layout: 'versatile_full',
-      priceF5: '3000',
-      priceF7: '6000',
-      priceF11: '18000',
-    });
-    toast.success('Campo creado correctamente.');
   };
 
   const handleUpdateField = async (fieldId: string) => {
-    const success = await updateField({
-      id: fieldId,
-      name: editFieldForm.name,
-      surface: editFieldForm.surface,
-    });
-    if (success) {
-      setEditingFieldId(null);
-      toast.success('Campo actualizado.');
-    } else {
-      toast.error('Error al actualizar el campo.');
+    if (updatingFieldId) return;
+    setUpdatingFieldId(fieldId);
+    try {
+      const success = await updateField({
+        id: fieldId,
+        name: editFieldForm.name,
+        surface: editFieldForm.surface,
+      });
+      if (success) {
+        setEditingFieldId(null);
+        toast.success('Campo actualizado.');
+      } else {
+        toast.error('Error al actualizar el campo.');
+      }
+    } finally {
+      setUpdatingFieldId(null);
     }
   };
 
@@ -627,6 +810,7 @@ export default function AdminDashboard() {
       F5: rules.find((r) => r.field_type === 'F5')?.price_per_hour ?? 0,
       F7: rules.find((r) => r.field_type === 'F7')?.price_per_hour ?? 0,
       F11: rules.find((r) => r.field_type === 'F11')?.price_per_hour ?? 0,
+      PADEL: rules.find((r) => r.field_type === 'PADEL')?.price_per_hour ?? 0,
     };
   };
 
@@ -729,7 +913,7 @@ export default function AdminDashboard() {
                   </thead>
                   <tbody>
                     {latestBookings.slice(0, 6).map((booking) => {
-                      const tone = getStatusTone(booking.status);
+                      const tone = getBookingStatusTone(booking);
                       return (
                         <tr key={booking.id} className="border-t border-border">
                           <td className="px-4 py-3 text-foreground">{formatBookingDate(booking.date)}</td>
@@ -737,7 +921,7 @@ export default function AdminDashboard() {
                           <td className="px-4 py-3">{booking.field_type}</td>
                           <td className="px-4 py-3">
                             <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${tone.bg} ${tone.text}`}>
-                              {formatBookingStatus(booking.status)}
+                              {getBookingStatusLabel(booking)}
                             </span>
                           </td>
                           <td className="px-4 py-3 font-medium text-foreground">{formatCurrency(booking.total_price)}</td>
@@ -753,21 +937,47 @@ export default function AdminDashboard() {
 
       case 'calendar':
         return (
-          <div className="space-y-4">
-            {/* Toggle Semana / Día */}
+          <div className="space-y-3">
+            {/* Selector de deporte + acciones */}
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="inline-flex rounded-2xl border border-border bg-card p-1 shadow-sm">
                 <button
                   type="button"
-                  onClick={() => setCalendarView('week')}
-                  className={`rounded-xl px-4 py-1.5 text-sm font-medium transition-all ${
-                    calendarView === 'week'
-                      ? 'bg-primary text-primary-foreground shadow'
+                  onClick={() => setCalendarSport('soccer')}
+                  className={`inline-flex items-center gap-2 rounded-xl px-4 py-1.5 text-sm font-medium transition-all ${
+                    calendarSport === 'soccer'
+                      ? 'bg-emerald-600 text-white shadow'
                       : 'text-muted-foreground hover:text-foreground'
                   }`}
                 >
-                  Semana
+                  <CircleDot className="h-4 w-4" />
+                  Fútbol
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setCalendarSport('padel')}
+                  className={`inline-flex items-center gap-2 rounded-xl px-4 py-1.5 text-sm font-medium transition-all ${
+                    calendarSport === 'padel'
+                      ? 'bg-sky-600 text-white shadow'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <Target className="h-4 w-4" />
+                  Pádel
+                </button>
+              </div>
+
+              <div className="inline-flex items-center gap-2">
+                <Button variant="outline" size="sm" className="h-9 gap-1.5" disabled title="Próximamente">
+                  <MoreHorizontal className="h-4 w-4" />
+                  Más acciones
+                </Button>
+              </div>
+            </div>
+
+            {/* Toggle Día / Semana + navegador de fecha */}
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="inline-flex rounded-2xl border border-border bg-card p-1 shadow-sm">
                 <button
                   type="button"
                   onClick={() => setCalendarView('day')}
@@ -778,6 +988,17 @@ export default function AdminDashboard() {
                   }`}
                 >
                   Día
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCalendarView('week')}
+                  className={`rounded-xl px-4 py-1.5 text-sm font-medium transition-all ${
+                    calendarView === 'week'
+                      ? 'bg-primary text-primary-foreground shadow'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  Semana
                 </button>
               </div>
 
@@ -821,7 +1042,7 @@ export default function AdminDashboard() {
             {calendarView === 'day' && (
               <AdminDailyCalendar
                 date={calendarDate}
-                fields={fields}
+                fields={calendarFields}
                 bookings={bookings}
                 blocks={blocks}
                 profiles={profiles}
@@ -966,6 +1187,89 @@ export default function AdminDashboard() {
                 </div>
               </div>
             )}
+
+            {/* Filtros: chips de estado + búsqueda + fecha + orden */}
+            <div className="space-y-3 rounded-2xl border border-border bg-card p-4 shadow-sm">
+              <div className="flex flex-wrap gap-2">
+                {([
+                  { key: 'all', label: 'Todas', tone: 'bg-slate-700 text-white' },
+                  { key: 'pending', label: 'Pendientes', tone: 'bg-amber-500 text-white' },
+                  { key: 'confirmed', label: 'Confirmadas', tone: 'bg-emerald-600 text-white' },
+                  { key: 'cancelled', label: 'Canceladas', tone: 'bg-rose-600 text-white' },
+                  { key: 'auto_expired', label: 'No confirmadas', tone: 'bg-zinc-500 text-white' },
+                ] as const).map((opt) => {
+                  const active = bookingsStatusFilter === opt.key;
+                  const count = bookingsCountByStatus[opt.key];
+                  return (
+                    <button
+                      key={opt.key}
+                      type="button"
+                      onClick={() => setBookingsStatusFilter(opt.key)}
+                      className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold transition-all ${
+                        active
+                          ? opt.tone
+                          : 'border border-border bg-background text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      {opt.label}
+                      <span className={`rounded-full px-1.5 text-[10px] font-bold ${
+                        active ? 'bg-white/25' : 'bg-muted text-foreground'
+                      }`}>
+                        {count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                <div className="sm:col-span-1">
+                  <label className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Buscar</label>
+                  <Input
+                    placeholder="Nombre, email, ID..."
+                    value={bookingsSearch}
+                    onChange={(e) => setBookingsSearch(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Fecha</label>
+                  <div className="flex gap-2">
+                    <Input
+                      type="date"
+                      value={bookingsDateFilter}
+                      onChange={(e) => setBookingsDateFilter(e.target.value)}
+                      className="flex-1"
+                    />
+                    {bookingsDateFilter && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setBookingsDateFilter('')}
+                        title="Mostrar todas las fechas"
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <label className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Ordenar</label>
+                  <Select value={bookingsSort} onValueChange={(v) => setBookingsSort(v as typeof bookingsSort)}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="recent">Más recientes</SelectItem>
+                      <SelectItem value="upcoming">Próximas fechas</SelectItem>
+                      <SelectItem value="amount">Mayor monto</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <p className="text-xs text-muted-foreground">
+                Mostrando <span className="font-semibold text-foreground">{filteredBookings.length}</span> de {bookings.length} reservas.
+              </p>
+            </div>
             <Dialog open={Boolean(selectedBookingId)} onOpenChange={(open) => {
               if (!open) {
                 closeBookingDetails();
@@ -991,7 +1295,7 @@ export default function AdminDashboard() {
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                       <div className="rounded-xl border border-border p-3"><p className="text-xs text-muted-foreground">Tipo</p><p className="mt-1 font-semibold text-foreground">{selectedBooking.field_type}</p></div>
-                      <div className="rounded-xl border border-border p-3"><p className="text-xs text-muted-foreground">Estado</p><p className="mt-1 font-semibold text-foreground">{formatBookingStatus(selectedBooking.status)}</p></div>
+                      <div className="rounded-xl border border-border p-3"><p className="text-xs text-muted-foreground">Estado</p><p className="mt-1 font-semibold text-foreground">{getBookingStatusLabel(selectedBooking)}</p></div>
                       <div className="rounded-xl border border-border p-3"><p className="text-xs text-muted-foreground">Fecha</p><p className="mt-1 font-semibold text-foreground">{selectedBooking.date}</p></div>
                       <div className="rounded-xl border border-border p-3"><p className="text-xs text-muted-foreground">Hora</p><p className="mt-1 font-semibold text-foreground">{formatTime12h(selectedBooking.start_time)} – {formatTime12h(selectedBooking.end_time)}</p></div>
                     </div>
@@ -1059,7 +1363,7 @@ export default function AdminDashboard() {
                       {selectedBooking.status === 'pending' && bookingActionMode === 'idle' && (
                         <>
                           <Button className="w-full bg-emerald-600 text-white hover:bg-emerald-700" onClick={() => void handleConfirmBooking(selectedBooking.id)} disabled={bookingActionBusy}>
-                            {bookingActionBusy ? 'Procesando...' : 'Confirmar pago y reserva'}
+                            {bookingActionBusy ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" />Procesando...</>) : 'Confirmar pago y reserva'}
                           </Button>
                           <Button className="w-full bg-destructive text-destructive-foreground hover:opacity-90" onClick={() => { setBookingActionMode('reject'); setBookingActionReason(''); }}>
                             Rechazar comprobante
@@ -1082,7 +1386,7 @@ export default function AdminDashboard() {
                               Volver
                             </Button>
                             <Button className="flex-1 bg-destructive text-destructive-foreground hover:opacity-90" onClick={() => void handleSubmitRejection(selectedBooking.id)} disabled={bookingActionBusy}>
-                              {bookingActionBusy ? 'Enviando...' : 'Rechazar y notificar'}
+                              {bookingActionBusy ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" />Enviando...</>) : 'Rechazar y notificar'}
                             </Button>
                           </div>
                         </div>
@@ -1113,7 +1417,7 @@ export default function AdminDashboard() {
                               Volver
                             </Button>
                             <Button className="flex-1 bg-destructive text-destructive-foreground hover:opacity-90" onClick={() => void handleSubmitCancelConfirmed(selectedBooking.id)} disabled={bookingActionBusy}>
-                              {bookingActionBusy ? 'Cancelando...' : 'Cancelar y notificar'}
+                              {bookingActionBusy ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" />Cancelando...</>) : 'Cancelar y notificar'}
                             </Button>
                           </div>
                         </div>
@@ -1124,10 +1428,15 @@ export default function AdminDashboard() {
               </DialogContent>
             </Dialog>
             <div className="grid gap-3 md:hidden">
-              {latestBookings.map((booking) => {
+              {filteredBookings.length === 0 && (
+                <div className="rounded-2xl border border-dashed border-border bg-card p-6 text-center text-sm text-muted-foreground">
+                  No hay reservas que coincidan con los filtros.
+                </div>
+              )}
+              {filteredBookings.map((booking) => {
                 const isUnseen = !booking.admin_seen_at && booking.status === 'pending';
                 const isConfirmed = booking.status === 'confirmed';
-                const statusLabel = booking.status === 'confirmed' ? 'Confirmada' : booking.status === 'cancelled' ? 'Cancelada' : 'Pendiente';
+                const tone = getBookingStatusTone(booking);
                 return (
                   <div key={booking.id} className={`rounded-2xl border p-4 shadow-sm ${isUnseen ? 'border-amber-300 bg-amber-50/50' : 'border-border bg-card'}`}>
                     <div className="flex items-start justify-between gap-3">
@@ -1136,12 +1445,8 @@ export default function AdminDashboard() {
                         <p className="font-mono text-xs text-muted-foreground">{booking.id.slice(0, 8)}</p>
                         <h3 className="mt-1 font-heading text-lg font-bold text-foreground">{booking.field_type}</h3>
                       </div>
-                      <span className={booking.status === 'confirmed'
-                        ? 'rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700'
-                        : booking.status === 'cancelled'
-                          ? 'rounded-full bg-destructive px-3 py-1 text-xs font-semibold text-destructive-foreground'
-                          : 'rounded-full bg-accent px-3 py-1 text-xs font-semibold text-accent-foreground'}>
-                        {statusLabel}
+                      <span className={`rounded-full px-3 py-1 text-xs font-semibold ${tone.bg} ${tone.text}`}>
+                        {getBookingStatusLabel(booking)}
                       </span>
                     </div>
 
@@ -1158,7 +1463,14 @@ export default function AdminDashboard() {
 
                     <div className="mt-4 flex flex-col gap-2 sm:flex-row">
                       {!isConfirmed && booking.status !== 'cancelled' && (
-                        <Button className="w-full bg-emerald-600 text-white hover:bg-emerald-700" size="sm" onClick={() => void handleConfirmBooking(booking.id)}>Confirmar</Button>
+                        <Button
+                          className="w-full bg-emerald-600 text-white hover:bg-emerald-700"
+                          size="sm"
+                          onClick={() => void handleConfirmBooking(booking.id)}
+                          disabled={bookingActionBusy}
+                        >
+                          {bookingActionBusy ? (<><Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />Procesando...</>) : 'Confirmar'}
+                        </Button>
                       )}
                       <Button className="w-full" size="sm" variant="outline" onClick={() => void openBookingDetails(booking.id)}>Ver y validar</Button>
                     </div>
@@ -1181,10 +1493,17 @@ export default function AdminDashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {latestBookings.map((booking) => {
+                    {filteredBookings.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="px-4 py-8 text-center text-sm text-muted-foreground">
+                          No hay reservas que coincidan con los filtros.
+                        </td>
+                      </tr>
+                    )}
+                    {filteredBookings.map((booking) => {
                       const isUnseen = !booking.admin_seen_at && booking.status === 'pending';
                       const isConfirmed = booking.status === 'confirmed';
-                      const statusLabel = booking.status === 'confirmed' ? 'Confirmada' : booking.status === 'cancelled' ? 'Cancelada' : 'Pendiente';
+                      const tone = getBookingStatusTone(booking);
                       return (
                         <tr key={booking.id} className={`border-t border-border ${isUnseen ? 'bg-amber-50/60' : ''}`}>
                           <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
@@ -1195,18 +1514,21 @@ export default function AdminDashboard() {
                           <td className="px-4 py-3">{formatTime12h(booking.start_time)} – {formatTime12h(booking.end_time)}</td>
                           <td className="px-4 py-3">{booking.field_type}</td>
                           <td className="px-4 py-3">
-                            <span className={booking.status === 'confirmed'
-                              ? 'rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700'
-                              : booking.status === 'cancelled'
-                                ? 'rounded-full bg-destructive px-3 py-1 text-xs font-semibold text-destructive-foreground'
-                                : 'rounded-full bg-accent px-3 py-1 text-xs font-semibold text-accent-foreground'}>
-                              {statusLabel}
+                            <span className={`rounded-full px-3 py-1 text-xs font-semibold ${tone.bg} ${tone.text}`}>
+                              {getBookingStatusLabel(booking)}
                             </span>
                           </td>
                           <td className="px-4 py-3">
                             <div className="flex gap-2">
                               {!isConfirmed && booking.status !== 'cancelled' && (
-                                <Button size="sm" className="bg-emerald-600 text-white hover:bg-emerald-700" onClick={() => void handleConfirmBooking(booking.id)}>Confirmar</Button>
+                                <Button
+                                  size="sm"
+                                  className="bg-emerald-600 text-white hover:bg-emerald-700"
+                                  onClick={() => void handleConfirmBooking(booking.id)}
+                                  disabled={bookingActionBusy}
+                                >
+                                  {bookingActionBusy ? (<><Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />Procesando...</>) : 'Confirmar'}
+                                </Button>
                               )}
                               <Button size="sm" variant="outline" onClick={() => void openBookingDetails(booking.id)}>Ver y validar</Button>
                             </div>
@@ -1263,7 +1585,7 @@ export default function AdminDashboard() {
                           const hasF7 = selectedField.units.some((u) => u.type === 'F7');
                           const hasF5 = selectedField.units.some((u) => u.type === 'F5');
                           const sortedUnits = [...selectedField.units].sort((a, b) => {
-                            const order: Record<FieldType, number> = { F11: 0, F7: 1, F5: 2 };
+                            const order: Record<FieldType, number> = { F11: 0, F7: 1, F5: 2, PADEL: 0 };
                             if (order[a.type] !== order[b.type]) return order[a.type] - order[b.type];
                             return a.name.localeCompare(b.name);
                           });
@@ -1346,7 +1668,9 @@ export default function AdminDashboard() {
                     </Select>
                   </div>
                   <Input placeholder="Razón del bloqueo" value={blockForm.reason} onChange={(event) => setBlockForm((prev) => ({ ...prev, reason: event.target.value }))} />
-                  <Button className="w-full" onClick={handleCreateBlock}>Guardar bloqueo</Button>
+                  <Button className="w-full" onClick={handleCreateBlock} disabled={creatingBlock}>
+                    {creatingBlock ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" />Guardando...</>) : 'Guardar bloqueo'}
+                  </Button>
                 </div>
               </DialogContent>
             </Dialog>
@@ -1462,7 +1786,9 @@ export default function AdminDashboard() {
                   <Input placeholder="Nombre del club" value={clubForm.name} onChange={(event) => setClubForm((prev) => ({ ...prev, name: event.target.value }))} />
                   <Input placeholder="Ubicación" value={clubForm.location} onChange={(event) => setClubForm((prev) => ({ ...prev, location: event.target.value }))} />
                   <Input placeholder="Descripción" value={clubForm.description} onChange={(event) => setClubForm((prev) => ({ ...prev, description: event.target.value }))} />
-                  <Button className="w-full" onClick={handleCreateClub}>Guardar club</Button>
+                  <Button className="w-full" onClick={handleCreateClub} disabled={creatingClub}>
+                    {creatingClub ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" />Creando...</>) : 'Guardar club'}
+                  </Button>
                 </div>
               </DialogContent>
             </Dialog>
@@ -1503,9 +1829,52 @@ export default function AdminDashboard() {
                           <label className="mb-1 block text-xs text-muted-foreground">Amenidades (separadas por coma)</label>
                           <Input value={editClubForm.amenities} onChange={(e) => setEditClubForm((p) => ({ ...p, amenities: e.target.value }))} placeholder="Estacionamiento, Vestidores, Cafetería" />
                         </div>
+
+                        {/* Notificaciones automáticas — remitente de los
+                            emails de reservas (confirmación, cancelación,
+                            comprobante recibido, alerta admin). El dominio
+                            del email DEBE estar verificado en Resend, si
+                            no las notificaciones no se envían. */}
+                        <div className="rounded-xl border border-border bg-muted/30 p-3">
+                          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                            Notificaciones automáticas
+                          </p>
+                          <p className="mb-3 text-xs text-muted-foreground">
+                            Configura desde qué correo se envían las notificaciones de reservas de este club. Si lo dejas vacío, se usa el remitente por defecto de la plataforma.
+                          </p>
+                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                            <div>
+                              <label className="mb-1 block text-xs text-muted-foreground">Nombre del remitente</label>
+                              <Input
+                                value={editClubForm.notification_sender_name}
+                                onChange={(e) => setEditClubForm((p) => ({ ...p, notification_sender_name: e.target.value }))}
+                                placeholder="Club Real Deportivo"
+                              />
+                            </div>
+                            <div>
+                              <label className="mb-1 block text-xs text-muted-foreground">Correo del remitente</label>
+                              <Input
+                                type="email"
+                                value={editClubForm.notification_email}
+                                onChange={(e) => setEditClubForm((p) => ({ ...p, notification_email: e.target.value }))}
+                                placeholder="reservas@club.com"
+                              />
+                            </div>
+                          </div>
+                          <p className="mt-2 text-[11px] leading-snug text-amber-700">
+                            <strong>Importante:</strong> el dominio del correo debe estar verificado en Resend. Si no lo está, los emails no saldrán y caerá al remitente por defecto.
+                          </p>
+                        </div>
+
                         <div className="flex gap-2">
-                          <Button size="sm" onClick={() => void handleUpdateClub(club.id)}><Save className="mr-1 h-3 w-3" />Guardar</Button>
-                          <Button size="sm" variant="ghost" onClick={() => setEditingClubId(null)}><X className="mr-1 h-3 w-3" />Cancelar</Button>
+                          <Button size="sm" onClick={() => void handleUpdateClub(club.id)} disabled={updatingClubId === club.id}>
+                            {updatingClubId === club.id
+                              ? (<><Loader2 className="mr-1 h-3 w-3 animate-spin" />Guardando...</>)
+                              : (<><Save className="mr-1 h-3 w-3" />Guardar</>)}
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => setEditingClubId(null)} disabled={updatingClubId === club.id}>
+                            <X className="mr-1 h-3 w-3" />Cancelar
+                          </Button>
                         </div>
                       </div>
                     ) : (
@@ -1526,6 +1895,8 @@ export default function AdminDashboard() {
                               phone: club.phone ?? '',
                               email: club.email ?? '',
                               amenities: (club.amenities ?? []).join(', '),
+                              notification_email: club.notification_email ?? '',
+                              notification_sender_name: club.notification_sender_name ?? '',
                             });
                           }}>
                             <Pencil className="h-4 w-4" />
@@ -1556,6 +1927,12 @@ export default function AdminDashboard() {
                             <span className="text-muted-foreground">F11</span>
                             <span className="font-semibold text-foreground">RD$ {prices.F11.toLocaleString()} / hora</span>
                           </div>
+                          {prices.PADEL > 0 && (
+                            <div className="flex items-center justify-between text-sm">
+                              <span className="text-muted-foreground">Pádel</span>
+                              <span className="font-semibold text-foreground">RD$ {prices.PADEL.toLocaleString()} / hora</span>
+                            </div>
+                          )}
                         </div>
                         <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
                           <span>{club.open_time} - {club.close_time}</span>
@@ -1628,29 +2005,66 @@ export default function AdminDashboard() {
                     <Input placeholder="Superficie (ej: Gramilla sintética)" value={fieldForm.surface} onChange={(event) => setFieldForm((prev) => ({ ...prev, surface: event.target.value }))} />
                   </div>
 
-                  {/* Step 2: Layout configuration */}
+                  {/* Step 2: Sport + Layout configuration */}
                   <div className="space-y-3">
-                    <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">2. Configuración de modalidades</p>
+                    <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">2. Deporte y modalidades</p>
+
                     <div>
-                      <label className="mb-1 block text-sm font-medium">¿Cómo quieres dividir la cancha?</label>
+                      <label className="mb-1.5 block text-sm font-medium">Deporte</label>
+                      <div className="inline-flex w-full rounded-2xl border border-border bg-card p-1 shadow-sm">
+                        <button
+                          type="button"
+                          onClick={() => setFieldForm((prev) => ({ ...prev, layout: 'versatile_full' }))}
+                          className={`inline-flex flex-1 items-center justify-center gap-2 rounded-xl px-3 py-1.5 text-sm font-medium transition-all ${
+                            layoutSport[fieldForm.layout] === 'soccer'
+                              ? 'bg-emerald-600 text-white shadow'
+                              : 'text-muted-foreground hover:text-foreground'
+                          }`}
+                        >
+                          <CircleDot className="h-4 w-4" />
+                          Fútbol
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setFieldForm((prev) => ({ ...prev, layout: 'padel_single' }))}
+                          className={`inline-flex flex-1 items-center justify-center gap-2 rounded-xl px-3 py-1.5 text-sm font-medium transition-all ${
+                            layoutSport[fieldForm.layout] === 'padel'
+                              ? 'bg-sky-600 text-white shadow'
+                              : 'text-muted-foreground hover:text-foreground'
+                          }`}
+                        >
+                          <Target className="h-4 w-4" />
+                          Pádel
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="mb-1 block text-sm font-medium">
+                        {layoutSport[fieldForm.layout] === 'padel' ? 'Configuración' : '¿Cómo quieres dividir la cancha?'}
+                      </label>
                       <Select value={fieldForm.layout} onValueChange={(value) => setFieldForm((prev) => ({ ...prev, layout: value as keyof typeof layoutLabels }))}>
                         <SelectTrigger><SelectValue /></SelectTrigger>
                         <SelectContent>
-                          {Object.entries(layoutLabels).map(([value, label]) => (
-                            <SelectItem key={value} value={value}>{label}</SelectItem>
-                          ))}
+                          {(Object.entries(layoutLabels) as [keyof typeof layoutLabels, string][])
+                            .filter(([value]) => layoutSport[value] === layoutSport[fieldForm.layout])
+                            .map(([value, label]) => (
+                              <SelectItem key={value} value={value}>{label}</SelectItem>
+                            ))}
                         </SelectContent>
                       </Select>
                       <p className="mt-1.5 text-xs text-muted-foreground">{layoutDescriptions[fieldForm.layout]}</p>
                     </div>
 
-                    {/* Live layout preview */}
-                    <div className="rounded-xl border border-border bg-muted/30 p-3">
-                      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        Vista previa de la cancha
-                      </p>
-                      <CourtLayoutPreview layout={fieldForm.layout} compact={false} />
-                    </div>
+                    {/* Live layout preview — solo para fútbol; pádel no tiene preview visual aún. */}
+                    {layoutSport[fieldForm.layout] === 'soccer' && (
+                      <div className="rounded-xl border border-border bg-muted/30 p-3">
+                        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          Vista previa de la cancha
+                        </p>
+                        <CourtLayoutPreview layout={fieldForm.layout} compact={false} />
+                      </div>
+                    )}
                   </div>
 
                   {/* Step 3: Pricing */}
@@ -1685,10 +2099,21 @@ export default function AdminDashboard() {
                           <Input type="number" placeholder="18000" value={fieldForm.priceF11} onChange={(e) => setFieldForm(p => ({ ...p, priceF11: e.target.value }))} />
                         </div>
                       )}
+                      {fieldForm.layout === 'padel_single' && (
+                        <div className="space-y-1">
+                          <label className="flex items-center gap-1.5 text-xs font-semibold text-sky-700">
+                            <span className="inline-block h-2.5 w-2.5 rounded-full bg-sky-500" />
+                            Pádel
+                          </label>
+                          <Input type="number" placeholder="1500" value={fieldForm.pricePadel} onChange={(e) => setFieldForm(p => ({ ...p, pricePadel: e.target.value }))} />
+                        </div>
+                      )}
                     </div>
                   </div>
 
-                  <Button className="w-full" onClick={handleCreateField}>Guardar cancha</Button>
+                  <Button className="w-full" onClick={handleCreateField} disabled={creatingField}>
+                    {creatingField ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" />Creando...</>) : 'Guardar cancha'}
+                  </Button>
                 </div>
               </DialogContent>
             </Dialog>
@@ -1698,12 +2123,15 @@ export default function AdminDashboard() {
               const f11 = field.units.filter((unit) => unit.type === 'F11');
               const f7 = field.units.filter((unit) => unit.type === 'F7');
               const f5 = field.units.filter((unit) => unit.type === 'F5');
+              const padel = field.units.filter((unit) => unit.type === 'PADEL');
+              const isPadel = padel.length > 0 || field.sport === 'padel';
               const isEditing = editingFieldId === field.id;
               const clubPrices = getClubPrices(field.club_id);
 
               // Detect the layout from unit composition
-              const detectedLayout: 'full_11' | 'three_7' | 'six_5' | 'versatile_full' =
-                f11.length > 0 && f7.length > 0 && f5.length > 0
+              const detectedLayout: keyof typeof layoutLabels = isPadel
+                ? 'padel_single'
+                : f11.length > 0 && f7.length > 0 && f5.length > 0
                   ? 'versatile_full'
                   : f11.length > 0
                     ? 'full_11'
@@ -1720,8 +2148,14 @@ export default function AdminDashboard() {
                         <Input value={editFieldForm.name} onChange={(e) => setEditFieldForm((p) => ({ ...p, name: e.target.value }))} placeholder="Nombre de la cancha" />
                         <Input value={editFieldForm.surface} onChange={(e) => setEditFieldForm((p) => ({ ...p, surface: e.target.value }))} placeholder="Superficie" />
                         <div className="flex gap-2">
-                          <Button size="sm" onClick={() => void handleUpdateField(field.id)}><Save className="mr-1 h-3 w-3" />Guardar</Button>
-                          <Button size="sm" variant="ghost" onClick={() => setEditingFieldId(null)}><X className="mr-1 h-3 w-3" />Cancelar</Button>
+                          <Button size="sm" onClick={() => void handleUpdateField(field.id)} disabled={updatingFieldId === field.id}>
+                            {updatingFieldId === field.id
+                              ? (<><Loader2 className="mr-1 h-3 w-3 animate-spin" />Guardando...</>)
+                              : (<><Save className="mr-1 h-3 w-3" />Guardar</>)}
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => setEditingFieldId(null)} disabled={updatingFieldId === field.id}>
+                            <X className="mr-1 h-3 w-3" />Cancelar
+                          </Button>
                         </div>
                       </div>
                     ) : (
@@ -1751,12 +2185,34 @@ export default function AdminDashboard() {
                     )}
                   </div>
 
-                  {!isEditing && (
+                  {!isEditing && isPadel && (
+                    <div className="p-5">
+                      <div className="flex items-center justify-between gap-3 rounded-2xl border border-sky-200 bg-sky-50 p-4">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-sky-600 text-white">
+                            <Target className="h-5 w-5" />
+                          </div>
+                          <div>
+                            <p className="font-heading text-sm font-bold text-sky-900">Cancha de Pádel</p>
+                            <p className="text-xs text-sky-700">Una unidad reservable por hora · no se subdivide</p>
+                          </div>
+                        </div>
+                        {clubPrices.PADEL > 0 && (
+                          <div className="text-right">
+                            <p className="text-[10px] font-bold uppercase text-sky-500">Precio</p>
+                            <p className="font-heading text-lg font-bold text-sky-700">RD$ {clubPrices.PADEL.toLocaleString()}/h</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {!isEditing && !isPadel && (
                     <div className="grid gap-0 lg:grid-cols-2">
                       {/* Left: Layout visual */}
                       <div className="border-b border-border p-5 lg:border-b-0 lg:border-r">
                         <p className="mb-3 text-xs font-bold uppercase tracking-wide text-muted-foreground">Distribución de zonas</p>
-                        <CourtLayoutPreview layout={detectedLayout} units={field.units} compact={false} />
+                        <CourtLayoutPreview layout={detectedLayout as 'full_11' | 'three_7' | 'six_5' | 'versatile_full'} units={field.units} compact={false} />
                       </div>
 
                       {/* Right: Stats + Pricing */}

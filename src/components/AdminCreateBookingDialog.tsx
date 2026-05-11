@@ -94,7 +94,7 @@ export default function AdminCreateBookingDialog({ open, onOpenChange, initialVa
     start_time: '18:00',
     end_time: '20:00',
     payment_method: 'cash',
-    status: 'confirmed',
+    status: 'pending',
     total_price: '',
     notes: '',
     field_unit_id: '',
@@ -179,10 +179,12 @@ export default function AdminCreateBookingDialog({ open, onOpenChange, initialVa
     }
   }, [computedPrice]);
 
-  // Filtro client-side de clientes por texto.
+  // Filtro client-side de clientes por texto. Sin búsqueda no listamos
+  // nada — la lista de clientes puede ser grande, así que el dropdown
+  // solo aparece cuando el admin escribe algo en el buscador.
   const filteredClients = useMemo(() => {
     const q = form.client_query.trim().toLowerCase();
-    if (!q) return clientProfiles.slice(0, 25);
+    if (!q) return [];
     return clientProfiles
       .filter((c) => {
         const haystack = `${c.first_name} ${c.last_name} ${c.email} ${c.phone}`.toLowerCase();
@@ -204,7 +206,7 @@ export default function AdminCreateBookingDialog({ open, onOpenChange, initialVa
       start_time: '18:00',
       end_time: '20:00',
       payment_method: 'cash',
-      status: 'confirmed',
+      status: 'pending',
       total_price: '',
       notes: '',
       field_unit_id: '',
@@ -311,28 +313,31 @@ export default function AdminCreateBookingDialog({ open, onOpenChange, initialVa
               value={form.client_query}
               onChange={(e) => setForm((p) => ({ ...p, client_query: e.target.value }))}
             />
-            <div className="max-h-44 overflow-y-auto rounded-xl border border-border">
-              {filteredClients.length === 0 ? (
-                <p className="px-3 py-3 text-xs text-muted-foreground">Sin resultados.</p>
-              ) : (
-                filteredClients.map((c) => (
-                  <button
-                    key={c.id}
-                    type="button"
-                    onClick={() => setForm((p) => ({ ...p, client_id: c.id, client_query: `${c.first_name} ${c.last_name}` }))}
-                    className={`flex w-full items-center justify-between gap-3 border-b border-border px-3 py-2 text-left text-sm last:border-b-0 hover:bg-accent ${
-                      form.client_id === c.id ? 'bg-primary/10' : ''
-                    }`}
-                  >
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate font-medium text-foreground">{c.first_name} {c.last_name}</p>
-                      <p className="truncate text-xs text-muted-foreground">{c.email} · {c.phone}</p>
-                    </div>
-                    {form.client_id === c.id && <span className="text-[10px] font-bold uppercase text-primary">Seleccionado</span>}
-                  </button>
-                ))
-              )}
-            </div>
+            {form.client_query.trim().length > 0
+              && form.client_query !== (selectedClient ? `${selectedClient.first_name} ${selectedClient.last_name}` : '') && (
+              <div className="max-h-44 overflow-y-auto rounded-xl border border-border">
+                {filteredClients.length === 0 ? (
+                  <p className="px-3 py-3 text-xs text-muted-foreground">Sin resultados.</p>
+                ) : (
+                  filteredClients.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => setForm((p) => ({ ...p, client_id: c.id, client_query: `${c.first_name} ${c.last_name}` }))}
+                      className={`flex w-full items-center justify-between gap-3 border-b border-border px-3 py-2 text-left text-sm last:border-b-0 hover:bg-accent ${
+                        form.client_id === c.id ? 'bg-primary/10' : ''
+                      }`}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-medium text-foreground">{c.first_name} {c.last_name}</p>
+                        <p className="truncate text-xs text-muted-foreground">{c.email} · {c.phone}</p>
+                      </div>
+                      {form.client_id === c.id && <span className="text-[10px] font-bold uppercase text-primary">Seleccionado</span>}
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
             {selectedClient && (
               <p className="text-xs text-muted-foreground">
                 Cliente: <span className="font-medium text-foreground">{selectedClient.first_name} {selectedClient.last_name}</span> · {selectedClient.email}
@@ -477,7 +482,7 @@ export default function AdminCreateBookingDialog({ open, onOpenChange, initialVa
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)} disabled={submitting}>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
             Cancelar
           </Button>
           <Button onClick={() => void handleSubmit()} disabled={submitting}>

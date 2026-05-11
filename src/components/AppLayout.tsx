@@ -32,6 +32,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { useDialogBackButton } from '@/hooks/useDialogBackButton';
+import NewBookingPopup from '@/components/NewBookingPopup';
 
 const clientNav = [
   { label: 'Inicio', icon: Home, path: '/' },
@@ -39,29 +40,55 @@ const clientNav = [
   { label: 'Mi perfil', icon: User, path: '/profile' },
 ];
 
+type PermissionGate =
+  | 'always'              // Visible para cualquier admin-level
+  | 'canManageBookings'
+  | 'canManageBlocks'
+  | 'canViewReports'
+  | 'canManageClubInfo'
+  | 'canManageFields'
+  | 'canManageVenueConfig'
+  | 'canManagePricing'
+  | 'canManageTeam';
+
 type AdminNavItem = {
   label: string;
   icon: typeof Home;
   path: string;
-  /** Sections marked admin-only are hidden for staff accounts. */
-  adminOnly?: boolean;
+  /** Permiso requerido para que este ítem aparezca en el sidebar. */
+  gate: PermissionGate;
 };
 
 const adminSections: AdminNavItem[] = [
-  { label: 'Resumen', icon: LayoutDashboard, path: '/admin/overview' },
-  { label: 'Calendario', icon: Calendar, path: '/admin/calendar' },
-  { label: 'Reservas', icon: ListChecks, path: '/admin/bookings' },
-  { label: 'Bloqueos', icon: Ban, path: '/admin/blocks' },
-  { label: 'Reportes', icon: BarChart3, path: '/admin/reports', adminOnly: true },
-  { label: 'Clubes', icon: Building2, path: '/admin/clubs', adminOnly: true },
-  { label: 'Campos', icon: Map, path: '/admin/fields', adminOnly: true },
-  { label: 'Configuración', icon: Settings, path: '/admin/config', adminOnly: true },
-  { label: 'Precios', icon: DollarSign, path: '/admin/pricing', adminOnly: true },
-  { label: 'Equipo', icon: UsersRound, path: '/admin/team', adminOnly: true },
+  { label: 'Resumen', icon: LayoutDashboard, path: '/admin/overview', gate: 'always' },
+  { label: 'Calendario', icon: Calendar, path: '/admin/calendar', gate: 'always' },
+  { label: 'Reservas', icon: ListChecks, path: '/admin/bookings', gate: 'canManageBookings' },
+  { label: 'Bloqueos', icon: Ban, path: '/admin/blocks', gate: 'canManageBlocks' },
+  { label: 'Reportes', icon: BarChart3, path: '/admin/reports', gate: 'canViewReports' },
+  { label: 'Clubes', icon: Building2, path: '/admin/clubs', gate: 'canManageClubInfo' },
+  { label: 'Campos', icon: Map, path: '/admin/fields', gate: 'canManageFields' },
+  { label: 'Configuración', icon: Settings, path: '/admin/config', gate: 'canManageVenueConfig' },
+  { label: 'Precios', icon: DollarSign, path: '/admin/pricing', gate: 'canManagePricing' },
+  { label: 'Equipo', icon: UsersRound, path: '/admin/team', gate: 'canManageTeam' },
 ];
 
 export default function AppLayout({ children }: { children: ReactNode }) {
-  const { user, logout, isAdmin, isStaff, isAdminLevel, staffClubId } = useAuth();
+  const {
+    user,
+    logout,
+    isAdmin,
+    isStaff,
+    isAdminLevel,
+    staffClubId,
+    canManageBookings,
+    canManageBlocks,
+    canManagePricing,
+    canManageClubInfo,
+    canManageFields,
+    canManageVenueConfig,
+    canManageTeam,
+    canViewReports,
+  } = useAuth();
   const { bookings } = useAppData();
   const navigate = useNavigate();
   const location = useLocation();
@@ -110,8 +137,29 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
   const navItems = useMemo(() => {
     if (!isAdminLevel) return clientNav;
-    return adminSections.filter((item) => !(item.adminOnly && isStaff));
-  }, [isAdminLevel, isStaff]);
+    const permissionByGate: Record<PermissionGate, boolean> = {
+      always: true,
+      canManageBookings,
+      canManageBlocks,
+      canViewReports,
+      canManageClubInfo,
+      canManageFields,
+      canManageVenueConfig,
+      canManagePricing,
+      canManageTeam,
+    };
+    return adminSections.filter((item) => permissionByGate[item.gate]);
+  }, [
+    isAdminLevel,
+    canManageBookings,
+    canManageBlocks,
+    canViewReports,
+    canManageClubInfo,
+    canManageFields,
+    canManageVenueConfig,
+    canManagePricing,
+    canManageTeam,
+  ]);
 
   if (!user) return <>{children}</>;
 
@@ -217,6 +265,10 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-screen w-full bg-background">
+      {/* Popup global de nueva reserva. Solo se monta cuando hay un
+          booking nuevo en el state del context — invisible mientras tanto. */}
+      <NewBookingPopup />
+
       <aside className="hidden w-72 shrink-0 border-r border-border bg-card lg:flex lg:flex-col">
         <NavContent />
       </aside>

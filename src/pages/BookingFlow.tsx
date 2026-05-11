@@ -1,6 +1,6 @@
 import { ChangeEvent, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Banknote, Building2, CalendarDays, CheckCircle, Clock3, CreditCard, Landmark, Mail, MapPin, Phone, Sparkles, Star, Upload, Users } from 'lucide-react';
+import { ArrowLeft, Banknote, Building2, CalendarDays, CheckCircle, CircleDot, Clock3, CreditCard, Landmark, Loader2, Mail, MapPin, Phone, Sparkles, Star, Target, Upload, Users } from 'lucide-react';
 import { PaymentMethod } from '@/types';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -12,7 +12,7 @@ import { formatTime12h } from '@/lib/bookingFormat';
 import { useAppData } from '@/contexts/AppDataContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
-import { FieldType, TimeSlot } from '@/types';
+import { Field, FieldType, Sport, TimeSlot } from '@/types';
 
 const BANK_ACCOUNT = {
   bank: 'Banco Popular',
@@ -37,18 +37,78 @@ export default function BookingFlow() {
   const { user } = useAuth();
 
   const club = clubs.find((item) => item.id === clubId) ?? null;
-  const clubFields = useMemo(
+  const allClubFields = useMemo(
     () => fields.filter((item) => item.club_id === clubId && item.is_active !== false),
     [fields, clubId],
   );
-  const field = clubFields[0] ?? null;
+
+  // Deporte del flujo: viene por ?sport=padel, o default al primero
+  // disponible. Si el club ofrece ambos, el usuario lo puede cambiar
+  // desde el switcher (chips arriba) sin salir del BookingFlow.
+  const sportParam = (searchParams.get('sport') as Sport | null);
+  const clubHasSoccer = allClubFields.some((f) => (f.sport ?? 'soccer') === 'soccer');
+  const clubHasPadel = allClubFields.some((f) => f.sport === 'padel');
+  const initialSport: Sport = sportParam === 'padel' && clubHasPadel
+    ? 'padel'
+    : sportParam === 'soccer' && clubHasSoccer
+      ? 'soccer'
+      : clubHasSoccer
+        ? 'soccer'
+        : clubHasPadel
+          ? 'padel'
+          : 'soccer';
+
+  const [activeSport, setActiveSport] = useState<Sport>(initialSport);
+
+  // Si el club cambia o si el clubHasSoccer/Padel cambia (ej. data llegó
+  // después del primer render), re-evaluamos el sport activo para que
+  // no quede apuntando a un deporte que el club no ofrece.
+  useEffect(() => {
+    if (activeSport === 'padel' && !clubHasPadel && clubHasSoccer) {
+      setActiveSport('soccer');
+    } else if (activeSport === 'soccer' && !clubHasSoccer && clubHasPadel) {
+      setActiveSport('padel');
+    }
+  }, [clubHasSoccer, clubHasPadel, activeSport]);
+
+  const clubFields = useMemo(
+    () => allClubFields.filter((f) => (f.sport ?? 'soccer') === activeSport),
+    [allClubFields, activeSport],
+  );
+
+  // Para pádel: cada cancha es su propio `field`, pero la lógica de
+  // availability/conflictos asume un único field. Como las unidades de
+  // pádel no comparten slots, podemos sintetizar un "field virtual" que
+  // agrega las unidades de todas las canchas de pádel del club.
+  // Renombramos cada unit con el nombre del field padre para que el
+  // jugador pueda distinguir entre "Cancha 1", "Cancha 2", etc. (el
+  // admin pone esos nombres al crear cada cancha de pádel).
+  // Para fútbol mantenemos el comportamiento anterior (un solo field).
+  const field: Field | null = useMemo(() => {
+    if (clubFields.length === 0) return null;
+    if (activeSport === 'padel') {
+      return {
+        id: `virtual-padel-${clubId}`,
+        club_id: clubId ?? '',
+        name: 'Canchas de Pádel',
+        units: clubFields.flatMap((f) => f.units.map((u) => ({ ...u, name: f.name }))),
+        is_active: true,
+        sport: 'padel',
+      };
+    }
+    return clubFields[0];
+  }, [clubFields, activeSport, clubId]);
+
   const owner = club ? profiles.find((p) => p.id === club.owner_id) : null;
 
-  const initialType = (searchParams.get('type') as FieldType | null) ?? null;
+  const initialType = (searchParams.get('type') as FieldType | null) ?? (activeSport === 'padel' ? 'PADEL' : null);
 
   const [step, setStep] = useState<Step>('configure');
   const [selectedMode, setSelectedMode] = useState<FieldType | null>(initialType);
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  // Arrancamos sin fecha — el jugador debe elegir explícitamente. Antes
+  // defaulteábamos a hoy y eso engañaba a usuarios que terminaban
+  // reservando "hoy" sin querer.
+  const [selectedDate, setSelectedDate] = useState<string>('');
   const [selectedHours, setSelectedHours] = useState<string[]>([]);
   const [showAllDates, setShowAllDates] = useState(false);
   const [serverTimeline, setServerTimeline] = useState<TimeSlot[] | null>(null);
@@ -105,17 +165,19 @@ export default function BookingFlow() {
   const visibleDays = showAllDates ? BOOKING_MAX_ADVANCE_DAYS : VISIBLE_DATE_WINDOW_DAYS;
 
   const modeAvailabilityCount = useMemo(() => {
-    if (!field) return { F5: 0, F7: 0, F11: 0 } as Record<FieldType, number>;
+    if (!field) return { F5: 0, F7: 0, F11: 0, PADEL: 0 } as Record<FieldType, number>;
     return {
       F5: getUnitsByType(field, 'F5').length,
       F7: getUnitsByType(field, 'F7').length,
       F11: getUnitsByType(field, 'F11').length,
+      PADEL: getUnitsByType(field, 'PADEL').length,
     };
   }, [field]);
 
   const availableModes = useMemo<FieldType[]>(() => {
-    return (['F5', 'F7', 'F11'] as FieldType[]).filter((type) => modeAvailabilityCount[type] > 0);
-  }, [modeAvailabilityCount]);
+    const candidates: FieldType[] = activeSport === 'padel' ? ['PADEL'] : ['F5', 'F7', 'F11'];
+    return candidates.filter((type) => modeAvailabilityCount[type] > 0);
+  }, [modeAvailabilityCount, activeSport]);
 
   useEffect(() => {
     if (selectedMode && !availableModes.includes(selectedMode)) {
@@ -124,10 +186,24 @@ export default function BookingFlow() {
     }
   }, [availableModes, selectedMode]);
 
+  // Pádel solo tiene una modalidad: auto-seleccionarla para saltar el paso.
+  useEffect(() => {
+    if (activeSport === 'padel' && availableModes.includes('PADEL') && selectedMode !== 'PADEL') {
+      setSelectedMode('PADEL');
+    }
+  }, [activeSport, availableModes, selectedMode]);
+
   useEffect(() => {
     let cancelled = false;
     const loadServerTimeline = async () => {
       if (!selectedMode || !field) {
+        setServerTimeline(null);
+        return;
+      }
+      // El campo virtual de pádel agrega unidades de múltiples canchas
+      // físicas — el RPC server-side no entiende ese agregado. Usamos
+      // el fallback client-side para pádel.
+      if (activeSport === 'padel') {
         setServerTimeline(null);
         return;
       }
@@ -141,7 +217,7 @@ export default function BookingFlow() {
     };
     void loadServerTimeline();
     return () => { cancelled = true; };
-  }, [selectedMode, selectedDate, field?.id, venueConfig?.slotDurationMinutes]);
+  }, [selectedMode, selectedDate, field?.id, venueConfig?.slotDurationMinutes, activeSport]);
 
   useEffect(() => {
     let cancelled = false;
@@ -333,8 +409,12 @@ export default function BookingFlow() {
         <ClubGallery clubId={club.id} fallbackInitial={club.name.charAt(0).toUpperCase()} />
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
-        <div className="space-y-6">
+      {/* `grid-cols-1` explícito + `minmax(0, 1fr)` (via `min-w-0` en
+          los hijos) evita que contenido largo (ej. nombre de cancha
+          de pádel) expanda las columnas más allá del viewport y rompa
+          el responsive en mobile. */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+        <div className="min-w-0 space-y-6">
           <section className="rounded-3xl border border-border bg-card p-5 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
@@ -342,7 +422,7 @@ export default function BookingFlow() {
                 <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
                   <span className="flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{club.location}</span>
                   <span className="flex items-center gap-1"><Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />{club.rating.toFixed(1)}</span>
-                  <span className="flex items-center gap-1"><Clock3 className="h-3.5 w-3.5" />{club.open_time}–{club.close_time}</span>
+                  <span className="flex items-center gap-1"><Clock3 className="h-3.5 w-3.5" />{formatTime12h(club.open_time)} – {formatTime12h(club.close_time)}</span>
                 </div>
               </div>
               {owner && (
@@ -404,24 +484,76 @@ export default function BookingFlow() {
 
           {step === 'configure' && (
             <>
-              <section className="space-y-3">
-                <header>
-                  <h2 className="font-heading text-base font-bold text-foreground">1. Modalidad</h2>
-                  <p className="text-xs text-muted-foreground">El sistema autoselecciona la cancha disponible que mejor encaje.</p>
-                </header>
-                <FieldModeSelector
-                  selected={selectedMode}
-                  onSelect={handleSelectMode}
-                  availableTypes={availableModes}
-                />
-              </section>
+              {/* Switcher de deporte cuando el club ofrece ambos. Si solo
+                  ofrece uno, no tiene sentido mostrar el switcher. */}
+              {clubHasSoccer && clubHasPadel && (
+                <section className="space-y-2">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">¿Qué deporte vas a jugar?</p>
+                  <div className="inline-flex w-full rounded-2xl border border-border bg-card p-1 shadow-sm">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveSport('soccer');
+                        setSelectedMode(null);
+                        setSelectedHours([]);
+                        setManualUnitId(null);
+                      }}
+                      className={`inline-flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-all ${
+                        activeSport === 'soccer'
+                          ? 'bg-emerald-600 text-white shadow'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      <CircleDot className="h-4 w-4" />
+                      Fútbol
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveSport('padel');
+                        setSelectedMode('PADEL');
+                        setSelectedHours([]);
+                        setManualUnitId(null);
+                      }}
+                      className={`inline-flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-all ${
+                        activeSport === 'padel'
+                          ? 'bg-sky-600 text-white shadow'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      <Target className="h-4 w-4" />
+                      Pádel
+                    </button>
+                  </div>
+                </section>
+              )}
+
+              {activeSport !== 'padel' && (
+                <section className="space-y-3">
+                  <header>
+                    <h2 className="font-heading text-base font-bold text-foreground">1. Modalidad</h2>
+                    <p className="text-xs text-muted-foreground">El sistema autoselecciona la cancha disponible que mejor encaje.</p>
+                  </header>
+                  <FieldModeSelector
+                    selected={selectedMode}
+                    onSelect={handleSelectMode}
+                    availableTypes={availableModes}
+                  />
+                </section>
+              )}
 
               <section className="space-y-3">
                 <header className="flex items-end justify-between gap-2">
                   <div>
-                    <h2 className="font-heading text-base font-bold text-foreground">2. Fecha y hora</h2>
+                    <h2 className="font-heading text-base font-bold text-foreground">
+                      {activeSport === 'padel' ? '1. Fecha y hora' : '2. Fecha y hora'}
+                    </h2>
                     <p className="text-xs text-muted-foreground">
-                      {selectedMode ? 'Verde: disponible · Rojo: ocupado' : 'Selecciona primero la modalidad.'}
+                      {!selectedMode
+                        ? 'Selecciona primero la modalidad.'
+                        : !selectedDate
+                          ? 'Elige una fecha para ver los horarios.'
+                          : 'Verde: disponible · Rojo: ocupado'}
                     </p>
                   </div>
                   {selectedMode && (
@@ -437,7 +569,7 @@ export default function BookingFlow() {
 
                 {selectedMode && (
                   <>
-                    <div className="flex gap-2 overflow-x-auto pb-2 snap-x snap-mandatory">
+                    <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-2 snap-x snap-mandatory">
                       {Array.from({ length: visibleDays }, (_, i) => {
                         const date = new Date();
                         date.setDate(date.getDate() + i);
@@ -473,17 +605,23 @@ export default function BookingFlow() {
                       })}
                     </div>
 
-                    <div className="rounded-3xl border border-border bg-card p-4 shadow-sm">
-                      <TimeSlotPicker
-                        slots={timeline}
-                        selectedSlots={selectedHours}
-                        onSelectionChange={handleSelectionChange}
-                        minMinutes={minimumMinutes}
-                        maxMinutes={maxSelectableSlots * slotDurationMinutes}
-                        incrementMinutes={incrementMinutes}
-                        slotDurationMinutes={slotDurationMinutes}
-                      />
-                    </div>
+                    {selectedDate ? (
+                      <div className="rounded-3xl border border-border bg-card p-4 shadow-sm">
+                        <TimeSlotPicker
+                          slots={timeline}
+                          selectedSlots={selectedHours}
+                          onSelectionChange={handleSelectionChange}
+                          minMinutes={minimumMinutes}
+                          maxMinutes={maxSelectableSlots * slotDurationMinutes}
+                          incrementMinutes={incrementMinutes}
+                          slotDurationMinutes={slotDurationMinutes}
+                        />
+                      </div>
+                    ) : (
+                      <div className="rounded-3xl border border-dashed border-border bg-muted/30 p-6 text-center text-sm text-muted-foreground">
+                        Selecciona una fecha arriba para ver los horarios disponibles.
+                      </div>
+                    )}
                   </>
                 )}
               </section>
@@ -504,6 +642,12 @@ export default function BookingFlow() {
                       const isAuto = autoUnit?.id === option.id && !manualUnitId;
                       const isManual = manualUnitId === option.id;
                       const isSelected = isAuto || isManual;
+                      // El subtítulo muestra "TIPO · S1 + S2" para fútbol,
+                      // pero para pádel slot_ids es [] — evitamos el " · "
+                      // colgante al final.
+                      const subtitle = option.slot_ids.length > 0
+                        ? `${option.type} · ${option.slot_ids.join(' + ')}`
+                        : option.type;
                       return (
                         <button
                           key={option.id}
@@ -520,13 +664,13 @@ export default function BookingFlow() {
                         >
                           <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0 flex-1">
-                              <p className="font-heading text-sm font-bold text-foreground">{option.name}</p>
-                              <p className="mt-0.5 text-xs text-muted-foreground">
-                                {option.type} · {option.slot_ids.join(' + ')}
+                              <p className="font-heading text-sm font-bold text-foreground truncate">{option.name}</p>
+                              <p className="mt-0.5 text-xs text-muted-foreground truncate">
+                                {subtitle}
                               </p>
                             </div>
                             <span
-                              className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                              className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${
                                 option.available
                                   ? isSelected
                                     ? 'bg-primary text-primary-foreground'
@@ -684,7 +828,7 @@ export default function BookingFlow() {
                       <Clock3 className="mt-0.5 h-4 w-4 flex-shrink-0 text-primary" />
                       <div className="text-sm">
                         <p className="font-semibold text-foreground">Horario de atención</p>
-                        <p className="text-muted-foreground">{club.open_time} – {club.close_time}</p>
+                        <p className="text-muted-foreground">{formatTime12h(club.open_time)} – {formatTime12h(club.close_time)}</p>
                       </div>
                     </div>
                     {club.phone && (
@@ -707,11 +851,11 @@ export default function BookingFlow() {
                   disabled={!canConfirm || submitting}
                   onClick={handleConfirm}
                 >
-                  {submitting
-                    ? 'Procesando reserva...'
-                    : paymentMethod === 'bank_transfer'
-                      ? 'Enviar reserva y comprobante'
-                      : 'Reservar y pagar en el club'}
+                  {submitting ? (
+                    <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Procesando reserva...</>
+                  ) : paymentMethod === 'bank_transfer'
+                    ? 'Enviar reserva y comprobante'
+                    : 'Reservar y pagar en el club'}
                 </Button>
 
                 <p className="mt-4 text-xs text-muted-foreground">
@@ -723,7 +867,7 @@ export default function BookingFlow() {
           )}
         </div>
 
-        <aside className="lg:sticky lg:top-6 lg:self-start">
+        <aside className="min-w-0 lg:sticky lg:top-6 lg:self-start">
           <div className="rounded-3xl border border-border bg-accent p-5 text-accent-foreground shadow-sm">
             <div className="flex items-center gap-2">
               <Building2 className="h-5 w-5" />
@@ -752,8 +896,8 @@ export default function BookingFlow() {
               </div>
               {selectedUnit && (
                 <div className="flex items-start justify-between gap-3">
-                  <dt className="text-muted-foreground flex items-center gap-1"><Users className="h-3.5 w-3.5" />Espacio</dt>
-                  <dd className="font-medium text-right">{selectedUnit.name}</dd>
+                  <dt className="text-muted-foreground flex shrink-0 items-center gap-1"><Users className="h-3.5 w-3.5" />Espacio</dt>
+                  <dd className="min-w-0 break-words font-medium text-right">{selectedUnit.name}</dd>
                 </div>
               )}
             </dl>

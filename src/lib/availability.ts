@@ -50,12 +50,25 @@ export function getUnitOptions(
   blocks: Block[],
 ): UnitOption[] {
   const occupied = getOccupiedSlotIds(date, startTime, endTime, field, bookings, blocks);
+
+  // Para unidades sin slot_ids (pádel), el grafo de slots no aplica.
+  // Necesitamos chequear directamente si la propia unidad ya tiene
+  // un booking o block que solape.
+  const directlyOccupiedUnitIds = new Set<string>();
+  bookings
+    .filter((booking) => booking.date === date && booking.status !== 'cancelled' && timeOverlaps(startTime, endTime, booking.start_time, booking.end_time))
+    .forEach((booking) => directlyOccupiedUnitIds.add(booking.field_unit_id));
+  blocks
+    .filter((block) => block.date === date && timeOverlaps(startTime, endTime, block.start_time, block.end_time))
+    .forEach((block) => block.field_unit_ids.forEach((id) => directlyOccupiedUnitIds.add(id)));
+
   return getUnitsByType(field, fieldType).map((unit) => ({
     id: unit.id,
     type: unit.type,
     name: unit.name,
     slot_ids: unit.slot_ids,
-    available: unit.slot_ids.every((slotId) => !occupied.has(slotId)),
+    available: !directlyOccupiedUnitIds.has(unit.id)
+      && unit.slot_ids.every((slotId) => !occupied.has(slotId)),
   }));
 }
 

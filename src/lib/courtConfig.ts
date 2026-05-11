@@ -159,9 +159,11 @@ export function buildFieldConfigSummary(field: Field): FieldConfigSummary {
   const allSlots = new Set<PhysicalSlotId>();
   field.units.forEach((u) => u.slot_ids.forEach((s) => allSlots.add(s)));
 
-  const unitCounts: Record<FieldType, number> = { F11: 0, F7: 0, F5: 0 };
+  const unitCounts: Record<FieldType, number> = { F11: 0, F7: 0, F5: 0, PADEL: 0 };
   for (const unit of activeUnits) {
-    unitCounts[unit.type]++;
+    if (unitCounts[unit.type] !== undefined) {
+      unitCounts[unit.type]++;
+    }
   }
 
   return {
@@ -270,6 +272,8 @@ export function getMaxSimultaneousBookings(fieldType: FieldType): number {
     case 'F11': return 1;
     case 'F7': return 3;
     case 'F5': return 6;
+    // Pádel: cada cancha es 1 unidad jugable y no se subdivide.
+    case 'PADEL': return 1;
   }
 }
 

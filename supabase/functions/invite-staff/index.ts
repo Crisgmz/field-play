@@ -31,6 +31,8 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
+type StaffRoleValue = 'groundskeeper' | 'receptionist' | 'accountant';
+
 interface CreateStaffRequest {
   email: string;
   password: string;
@@ -38,6 +40,7 @@ interface CreateStaffRequest {
   last_name?: string;
   phone?: string;
   club_id: string;
+  staff_role?: StaffRoleValue;
 }
 
 const json = (status: number, body: unknown) =>
@@ -70,12 +73,20 @@ Deno.serve(async (req) => {
     return json(400, { error: 'Body JSON inválido.' });
   }
 
-  const { email, password, first_name, last_name, phone, club_id } = payload;
+  const { email, password, first_name, last_name, phone, club_id, staff_role } = payload;
   if (!email || !first_name || !club_id) {
     return json(400, { error: 'email, first_name y club_id son obligatorios.' });
   }
   if (!password || password.length < 8) {
     return json(400, { error: 'La contraseña debe tener al menos 8 caracteres.' });
+  }
+  // Sub-rol opcional para retrocompatibilidad. Si viene, debe ser uno
+  // de los 3 valores válidos (mismo check que la migración 016).
+  const validatedStaffRole: StaffRoleValue | null = staff_role && ['groundskeeper', 'receptionist', 'accountant'].includes(staff_role)
+    ? staff_role
+    : null;
+  if (staff_role && !validatedStaffRole) {
+    return json(400, { error: `staff_role inválido: ${staff_role}` });
   }
 
   const normalizedEmail = email.trim().toLowerCase();
@@ -140,6 +151,7 @@ Deno.serve(async (req) => {
       .update({
         role: 'staff',
         staff_club_id: club_id,
+        staff_role: validatedStaffRole,
         is_active: true,
         first_name,
         last_name: last_name ?? '',
@@ -156,6 +168,7 @@ Deno.serve(async (req) => {
       user_metadata: {
         role: 'staff',
         staff_club_id: club_id,
+        staff_role: validatedStaffRole,
         first_name,
         last_name: last_name ?? '',
         phone: phone ?? '',
@@ -181,6 +194,7 @@ Deno.serve(async (req) => {
     user_metadata: {
       role: 'staff',
       staff_club_id: club_id,
+      staff_role: validatedStaffRole,
       first_name,
       last_name: last_name ?? '',
       phone: phone ?? '',
@@ -193,6 +207,21 @@ Deno.serve(async (req) => {
       return json(409, { error: 'Ya existe una cuenta con ese email pero el perfil no se sincronizó. Contacta al administrador del sistema.' });
     }
     return json(500, { error: 'No se pudo crear el empleado.', details: message });
+  }
+
+  // El trigger handle_new_user (migración 006) crea el profile pero no
+  // conoce la columna staff_role agregada en la migración 016. Hacemos
+  // un UPDATE explícito para grabar el sub-rol.
+  if (validatedStaffRole) {
+    const { error: roleErr } = await adminClient
+      .from('profiles')
+      .update({ staff_role: validatedStaffRole })
+      .eq('id', created.user.id);
+    if (roleErr) {
+      console.error('No se pudo guardar staff_role en profile:', roleErr.message);
+      // No fallamos el flujo: el empleado quedó creado, solo el sub-rol
+      // no se grabó. El admin puede arreglarlo desde la UI de permisos.
+    }
   }
 
   return json(200, {

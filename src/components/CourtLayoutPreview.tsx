@@ -41,6 +41,7 @@ const TYPE_COLORS: Record<FieldType, { bg: string; border: string; text: string;
   F11: { bg: 'bg-violet-100', border: 'border-violet-400', text: 'text-violet-700', ring: 'ring-violet-400' },
   F7: { bg: 'bg-sky-100', border: 'border-sky-400', text: 'text-sky-700', ring: 'ring-sky-400' },
   F5: { bg: 'bg-amber-100', border: 'border-amber-400', text: 'text-amber-700', ring: 'ring-amber-400' },
+  PADEL: { bg: 'bg-sky-100', border: 'border-sky-500', text: 'text-sky-700', ring: 'ring-sky-500' },
 };
 
 const SLOT_IDS: PhysicalSlotId[] = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6'];

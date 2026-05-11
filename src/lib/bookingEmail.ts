@@ -6,9 +6,15 @@ type RegistrationEmailPayload = {
   lastName?: string;
 };
 
+// `clubId` se manda en todos los payloads de reserva — la Edge function
+// lo usa para leer el remitente configurado (`notification_email` y
+// `notification_sender_name` en `clubs`). Si no hay configuración por
+// club, cae al default global.
+
 interface BookingReceivedEmailPayload {
   email: string;
   firstName: string;
+  clubId: string;
   clubName?: string;
   fieldName?: string;
   unitName?: string;
@@ -25,6 +31,7 @@ interface AdminBookingAlertPayload {
   clientName?: string;
   clientEmail?: string;
   clientPhone?: string;
+  clubId: string;
   clubName?: string;
   fieldName?: string;
   unitName?: string;
@@ -40,6 +47,7 @@ interface AdminBookingAlertPayload {
 interface BookingConfirmedEmailPayload {
   email: string;
   firstName: string;
+  clubId: string;
   clubName?: string;
   clubLocation?: string;
   fieldName?: string;
@@ -55,6 +63,7 @@ interface BookingConfirmedEmailPayload {
 interface BookingCancelledEmailPayload {
   email: string;
   firstName: string;
+  clubId: string;
   clubName?: string;
   fieldName?: string;
   unitName?: string;

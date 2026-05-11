@@ -1,5 +1,5 @@
-import { Club, FieldType } from '@/types';
-import { CalendarCheck, CalendarClock, Heart, MapPin, Star } from 'lucide-react';
+import { Club, FieldType, Sport } from '@/types';
+import { CalendarCheck, CalendarClock, CircleDot, Heart, MapPin, Star, Target } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useMemo, useState } from 'react';
 import { useAppData } from '@/contexts/AppDataContext';
@@ -9,6 +9,7 @@ import FadeInImage from '@/components/FadeInImage';
 interface Props {
   club: Club;
   preselectedType?: FieldType | null;
+  preselectedSport?: Sport | null;
 }
 
 const NEXT_AVAILABILITY_LOOKAHEAD_DAYS = 14;
@@ -35,7 +36,7 @@ function formatNextAvailability(date: string, today: string): string {
   return new Intl.DateTimeFormat('es-DO', { day: 'numeric', month: 'short' }).format(target);
 }
 
-export default function ClubCard({ club, preselectedType }: Props) {
+export default function ClubCard({ club, preselectedType, preselectedSport }: Props) {
   const navigate = useNavigate();
   const {
     pricingRules,
@@ -60,12 +61,30 @@ export default function ClubCard({ club, preselectedType }: Props) {
   const galleryImages = getClubImages(club.id);
   const heroImage = galleryImages[0] ? getClubImageUrl(galleryImages[0]) : club.image || '';
 
+  const clubSports = useMemo(() => {
+    const set = new Set<Sport>();
+    fields
+      .filter((f) => f.club_id === club.id && f.is_active !== false)
+      .forEach((f) => set.add((f.sport ?? 'soccer') as Sport));
+    return set;
+  }, [fields, club.id]);
+
   const nextAvailabilityLabel = useMemo(() => {
-    const clubFields = fields.filter((f) => f.club_id === club.id && f.is_active !== false);
+    const clubFields = fields.filter(
+      (f) => f.club_id === club.id
+        && f.is_active !== false
+        && (!preselectedSport || (f.sport ?? 'soccer') === preselectedSport),
+    );
     if (clubFields.length === 0) return null;
     const venueConfig = getVenueConfig(club.id);
     const todayStr = new Date().toISOString().split('T')[0];
-    const types: FieldType[] = preselectedType ? [preselectedType] : ['F5', 'F7', 'F11'];
+    const types: FieldType[] = preselectedType
+      ? [preselectedType]
+      : preselectedSport === 'padel'
+        ? ['PADEL']
+        : preselectedSport === 'soccer'
+          ? ['F5', 'F7', 'F11']
+          : ['F5', 'F7', 'F11', 'PADEL'];
 
     for (let i = 0; i < NEXT_AVAILABILITY_LOOKAHEAD_DAYS; i += 1) {
       const date = new Date();
@@ -81,11 +100,12 @@ export default function ClubCard({ club, preselectedType }: Props) {
       }
     }
     return null;
-  }, [club, fields, bookings, blocks, getVenueConfig, preselectedType]);
+  }, [club, fields, bookings, blocks, getVenueConfig, preselectedType, preselectedSport]);
 
   const handleNavigate = () => {
     const params = new URLSearchParams();
     if (preselectedType) params.set('type', preselectedType);
+    if (preselectedSport) params.set('sport', preselectedSport);
     const query = params.toString();
     navigate(`/clubs/${club.id}${query ? `?${query}` : ''}`);
   };
@@ -142,12 +162,24 @@ export default function ClubCard({ club, preselectedType }: Props) {
       </div>
 
       <div className="flex flex-1 flex-col gap-3 p-4">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="inline-flex items-center gap-1 rounded-md bg-amber-400 px-2 py-0.5 text-[11px] font-bold text-white">
             <Star className="h-3 w-3 fill-white text-white" />
             {club.rating.toFixed(1)}
           </span>
           <span className="text-xs text-muted-foreground">Rating del club</span>
+          {clubSports.has('soccer') && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+              <CircleDot className="h-3 w-3" />
+              Fútbol
+            </span>
+          )}
+          {clubSports.has('padel') && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-semibold text-sky-700">
+              <Target className="h-3 w-3" />
+              Pádel
+            </span>
+          )}
         </div>
 
         <div>

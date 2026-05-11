@@ -1,5 +1,8 @@
 import { useMemo, useState } from 'react';
-import { CheckCircle2, Copy, Eye, EyeOff, Loader2, Mail, Phone, RefreshCw, ShieldOff, Trash2, UserPlus, UserX } from 'lucide-react';
+import { CheckCircle2, Copy, Eye, EyeOff, Loader2, Lock, Mail, Phone, RefreshCw, ShieldOff, Trash2, UserPlus, UserX } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
+import { Switch } from '@/components/ui/switch';
+import type { PermissionKey, StaffRole, User } from '@/types';
 import { toast } from 'sonner';
 import {
   Dialog,
@@ -25,6 +28,59 @@ import { useAppData } from '@/contexts/AppDataContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useDialogBackButton } from '@/hooks/useDialogBackButton';
 
+const STAFF_ROLE_LABELS: Record<StaffRole, { label: string; short: string; tone: string }> = {
+  groundskeeper: { label: 'Encargado de cancha', short: 'Encargado', tone: 'bg-emerald-50 text-emerald-700' },
+  receptionist: { label: 'Recepción / Secretaria', short: 'Recepción', tone: 'bg-sky-50 text-sky-700' },
+  accountant: { label: 'Contable', short: 'Contable', tone: 'bg-violet-50 text-violet-700' },
+};
+
+// Matriz base por sub-rol (mismo contenido que AuthContext). Aquí solo
+// se usa para mostrar al admin qué permisos vienen "por default" y
+// cuáles son overrides explícitos sobre el perfil.
+const BASE_STAFF_PERMS: Record<StaffRole, Record<PermissionKey, boolean>> = {
+  groundskeeper: {
+    canManageBookings: false, canManageBlocks: true, canManagePricing: false,
+    canManageClubInfo: false, canManageFields: false, canManageVenueConfig: false,
+    canManageTeam: false, canViewReports: false, canManagePayments: false, canManageClients: false,
+  },
+  receptionist: {
+    canManageBookings: true, canManageBlocks: true, canManagePricing: false,
+    canManageClubInfo: false, canManageFields: false, canManageVenueConfig: false,
+    canManageTeam: false, canViewReports: false, canManagePayments: true, canManageClients: true,
+  },
+  accountant: {
+    canManageBookings: false, canManageBlocks: false, canManagePricing: false,
+    canManageClubInfo: false, canManageFields: false, canManageVenueConfig: false,
+    canManageTeam: false, canViewReports: true, canManagePayments: false, canManageClients: false,
+  },
+};
+
+const PERMISSION_LABELS: Record<PermissionKey, string> = {
+  canManageBookings: 'Gestionar reservas',
+  canManageBlocks: 'Crear bloqueos',
+  canManagePricing: 'Editar precios',
+  canManageClubInfo: 'Editar info del club',
+  canManageFields: 'Crear / editar canchas',
+  canManageVenueConfig: 'Configurar horarios',
+  canManageTeam: 'Gestionar equipo',
+  canViewReports: 'Ver reportes',
+  canManagePayments: 'Validar pagos',
+  canManageClients: 'Gestionar clientes',
+};
+
+const PERMISSION_KEYS: PermissionKey[] = [
+  'canManageBookings',
+  'canManageBlocks',
+  'canManagePayments',
+  'canManageClients',
+  'canViewReports',
+  'canManagePricing',
+  'canManageClubInfo',
+  'canManageFields',
+  'canManageVenueConfig',
+  'canManageTeam',
+];
+
 export default function TeamPanel() {
   const { user } = useAuth();
   const { clubs, profiles, inviteStaff, setStaffActive, removeStaff } = useAppData();
@@ -39,17 +95,35 @@ export default function TeamPanel() {
   const [showPassword, setShowPassword] = useState(false);
   const [createdCredentials, setCreatedCredentials] = useState<{ email: string; password: string } | null>(null);
   const [removeTarget, setRemoveTarget] = useState<string | null>(null);
+  const [permissionsMemberId, setPermissionsMemberId] = useState<string | null>(null);
+  const [permissionBusyKey, setPermissionBusyKey] = useState<PermissionKey | null>(null);
+
+  const permissionsMember = useMemo(
+    () => profiles.find((p) => p.id === permissionsMemberId) ?? null,
+    [profiles, permissionsMemberId],
+  );
+
+  useDialogBackButton(Boolean(permissionsMember), () => setPermissionsMemberId(null));
 
   useDialogBackButton(inviteOpen, () => setInviteOpen(false));
   useDialogBackButton(Boolean(createdCredentials), () => setCreatedCredentials(null));
   useDialogBackButton(Boolean(removeTarget), () => setRemoveTarget(null));
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<{
+    email: string;
+    first_name: string;
+    last_name: string;
+    phone: string;
+    password: string;
+    club_id: string;
+    staff_role: 'groundskeeper' | 'receptionist' | 'accountant';
+  }>({
     email: '',
     first_name: '',
     last_name: '',
     phone: '',
     password: '',
     club_id: ownedClubs[0]?.id ?? '',
+    staff_role: 'receptionist',
   });
 
   const generatePassword = () => {
@@ -81,6 +155,7 @@ export default function TeamPanel() {
       phone: '',
       password: '',
       club_id: ownedClubs[0]?.id ?? '',
+      staff_role: 'receptionist',
     });
     setShowPassword(false);
   };
@@ -92,6 +167,48 @@ export default function TeamPanel() {
     }
     resetForm();
     setInviteOpen(true);
+  };
+
+  // Permiso efectivo: si hay override en el perfil, ese gana. Si no,
+  // se usa el default del sub-rol. Si el staff no tiene sub-rol
+  // (cuentas legacy), aplicamos el mismo fallback que AuthContext.
+  const getEffectivePermission = (member: User, key: PermissionKey): boolean => {
+    const override = member.extra_permissions?.[key];
+    if (override !== undefined) return override;
+    if (member.staff_role) return BASE_STAFF_PERMS[member.staff_role][key];
+    return key === 'canManageBookings' || key === 'canManageBlocks';
+  };
+
+  const hasOverride = (member: User, key: PermissionKey): boolean =>
+    member.extra_permissions?.[key] !== undefined;
+
+  const setPermission = async (member: User, key: PermissionKey, granted: boolean) => {
+    setPermissionBusyKey(key);
+    const { error } = await supabase.rpc('rpc_set_staff_permission', {
+      p_profile_id: member.id,
+      p_permission: key,
+      p_granted: granted,
+    });
+    setPermissionBusyKey(null);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    toast.success(granted ? 'Permiso otorgado.' : 'Permiso revocado.');
+  };
+
+  const resetPermission = async (member: User, key: PermissionKey) => {
+    setPermissionBusyKey(key);
+    const { error } = await supabase.rpc('rpc_reset_staff_permission', {
+      p_profile_id: member.id,
+      p_permission: key,
+    });
+    setPermissionBusyKey(null);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    toast.success('Permiso restaurado al default del rol.');
   };
 
   const submitInvite = async () => {
@@ -111,6 +228,7 @@ export default function TeamPanel() {
       last_name: form.last_name,
       phone: form.phone,
       club_id: form.club_id,
+      staff_role: form.staff_role,
     });
     setSubmitting(false);
     if (result.ok) {
@@ -201,6 +319,11 @@ export default function TeamPanel() {
                               {member.first_name} {member.last_name}
                             </p>
                             <p className="text-xs text-muted-foreground">{member.email}</p>
+                            {member.staff_role && (
+                              <span className={`mt-1 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${STAFF_ROLE_LABELS[member.staff_role].tone}`}>
+                                {STAFF_ROLE_LABELS[member.staff_role].short}
+                              </span>
+                            )}
                           </div>
                         </div>
                       </td>
@@ -224,6 +347,14 @@ export default function TeamPanel() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex justify-end gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setPermissionsMemberId(member.id)}
+                          >
+                            <Lock className="mr-1 h-3.5 w-3.5" />
+                            Permisos
+                          </Button>
                           <Button
                             size="sm"
                             variant={active ? 'outline' : 'default'}
@@ -265,6 +396,11 @@ export default function TeamPanel() {
                             {member.first_name} {member.last_name}
                           </p>
                           <p className="truncate text-xs text-muted-foreground">{club?.name ?? '—'}</p>
+                          {member.staff_role && (
+                            <span className={`mt-1 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${STAFF_ROLE_LABELS[member.staff_role].tone}`}>
+                              {STAFF_ROLE_LABELS[member.staff_role].short}
+                            </span>
+                          )}
                         </div>
                         {active ? (
                           <span className="inline-flex flex-shrink-0 items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-medium text-emerald-700">
@@ -290,7 +426,16 @@ export default function TeamPanel() {
                       </div>
                     </div>
                   </div>
-                  <div className="mt-3 flex gap-2">
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="flex-1"
+                      onClick={() => setPermissionsMemberId(member.id)}
+                    >
+                      <Lock className="mr-1 h-3.5 w-3.5" />
+                      Permisos
+                    </Button>
                     <Button
                       size="sm"
                       variant={active ? 'outline' : 'default'}
@@ -378,6 +523,34 @@ export default function TeamPanel() {
               </p>
             </div>
 
+            <div>
+              <label className="mb-1 block text-xs text-muted-foreground">Tipo de empleado</label>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                {([
+                  { value: 'groundskeeper', label: 'Encargado de cancha', desc: 'Agenda + bloqueos' },
+                  { value: 'receptionist', label: 'Recepción / Secretaria', desc: 'Reservas + pagos' },
+                  { value: 'accountant', label: 'Contable', desc: 'Solo reportes' },
+                ] as const).map((opt) => {
+                  const active = form.staff_role === opt.value;
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setForm((p) => ({ ...p, staff_role: opt.value }))}
+                      className={`rounded-xl border p-3 text-left transition-colors ${
+                        active
+                          ? 'border-primary bg-primary/10 text-foreground'
+                          : 'border-border bg-card hover:border-primary/40'
+                      }`}
+                    >
+                      <p className="text-sm font-semibold text-foreground">{opt.label}</p>
+                      <p className="mt-0.5 text-[11px] text-muted-foreground">{opt.desc}</p>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             {ownedClubs.length > 1 ? (
               <div>
                 <label className="mb-1 block text-xs text-muted-foreground">Club asignado</label>
@@ -454,6 +627,86 @@ export default function TeamPanel() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Dialog de permisos: muestra cada permiso de la matriz con un
+          switch. La etiqueta "Default" indica que viene del rol; cuando
+          el admin lo cambia, queda marcado como "Personalizado" con un
+          botón para restaurarlo al default del rol. */}
+      <Dialog
+        open={Boolean(permissionsMember)}
+        onOpenChange={(open) => { if (!open) setPermissionsMemberId(null); }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Permisos del empleado</DialogTitle>
+            <DialogDescription>
+              {permissionsMember && (
+                <>
+                  {permissionsMember.first_name} {permissionsMember.last_name}
+                  {permissionsMember.staff_role && (
+                    <>
+                      {' · '}
+                      <span className="font-medium text-foreground">
+                        {STAFF_ROLE_LABELS[permissionsMember.staff_role].label}
+                      </span>
+                    </>
+                  )}
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          {permissionsMember && (
+            <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
+              {PERMISSION_KEYS.map((key) => {
+                const effective = getEffectivePermission(permissionsMember, key);
+                const isOverride = hasOverride(permissionsMember, key);
+                const baseValue = permissionsMember.staff_role
+                  ? BASE_STAFF_PERMS[permissionsMember.staff_role][key]
+                  : (key === 'canManageBookings' || key === 'canManageBlocks');
+                return (
+                  <div
+                    key={key}
+                    className={`flex items-center justify-between gap-3 rounded-xl border p-3 ${
+                      isOverride ? 'border-amber-300 bg-amber-50/50' : 'border-border bg-card'
+                    }`}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-foreground">{PERMISSION_LABELS[key]}</p>
+                      <p className="mt-0.5 text-[11px] text-muted-foreground">
+                        {isOverride
+                          ? (<>Personalizado — default del rol: <span className="font-semibold">{baseValue ? 'permitido' : 'denegado'}</span></>)
+                          : 'Default del rol'}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {isOverride && (
+                        <button
+                          type="button"
+                          onClick={() => void resetPermission(permissionsMember, key)}
+                          disabled={permissionBusyKey === key}
+                          className="rounded-md px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-muted disabled:opacity-50"
+                        >
+                          Restaurar
+                        </button>
+                      )}
+                      <Switch
+                        checked={effective}
+                        disabled={permissionBusyKey === key}
+                        onCheckedChange={(next) => void setPermission(permissionsMember, key, next)}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPermissionsMemberId(null)}>
+              Cerrar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

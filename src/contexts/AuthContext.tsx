@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { AuthChangeEvent, Session } from '@supabase/supabase-js';
-import { LoginInput, RegisterInput, User } from '@/types';
+import { ExtraPermissions, LoginInput, PermissionKey, RegisterInput, StaffRole, User } from '@/types';
 import { supabase } from '@/lib/supabase';
 import { sendRegistrationWelcomeEmail } from '@/lib/bookingEmail';
 
@@ -31,6 +31,7 @@ interface AuthContextType {
   isStaff: boolean;
   isAdminLevel: boolean;
   staffClubId: string | null;
+  staffRole: StaffRole | null;
   canManageBookings: boolean;
   canManageBlocks: boolean;
   canManagePricing: boolean;
@@ -38,6 +39,9 @@ interface AuthContextType {
   canManageFields: boolean;
   canManageVenueConfig: boolean;
   canManageTeam: boolean;
+  canViewReports: boolean;
+  canManagePayments: boolean;
+  canManageClients: boolean;
   loading: boolean;
   refreshProfile: () => Promise<User | null>;
 }
@@ -54,6 +58,7 @@ const AuthContext = createContext<AuthContextType>({
   isStaff: false,
   isAdminLevel: false,
   staffClubId: null,
+  staffRole: null,
   canManageBookings: false,
   canManageBlocks: false,
   canManagePricing: false,
@@ -61,6 +66,9 @@ const AuthContext = createContext<AuthContextType>({
   canManageFields: false,
   canManageVenueConfig: false,
   canManageTeam: false,
+  canViewReports: false,
+  canManagePayments: false,
+  canManageClients: false,
   loading: true,
   refreshProfile: async () => null,
 });
@@ -94,7 +102,7 @@ async function loadProfile(session: Session | null): Promise<User | null> {
 
   const query = supabase
     .from('profiles')
-    .select('id, email, first_name, last_name, phone, national_id, role, staff_club_id, is_active')
+    .select('id, email, first_name, last_name, phone, national_id, role, staff_club_id, staff_role, extra_permissions, is_active')
     .eq('id', session.user.id)
     .maybeSingle();
 
@@ -113,7 +121,12 @@ async function loadProfile(session: Session | null): Promise<User | null> {
     return null;
   }
 
-  const extras = data as typeof data & { staff_club_id?: string | null; is_active?: boolean };
+  const extras = data as typeof data & {
+    staff_club_id?: string | null;
+    staff_role?: StaffRole | null;
+    extra_permissions?: ExtraPermissions | null;
+    is_active?: boolean;
+  };
   return {
     id: data.id,
     email: data.email,
@@ -123,6 +136,8 @@ async function loadProfile(session: Session | null): Promise<User | null> {
     national_id: data.national_id,
     role: data.role,
     staff_club_id: extras.staff_club_id ?? null,
+    staff_role: extras.staff_role ?? null,
+    extra_permissions: extras.extra_permissions ?? {},
     is_active: extras.is_active ?? true,
   };
 }
@@ -426,6 +441,68 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const isAdmin = user?.role === 'club_admin';
     const isStaff = user?.role === 'staff' && user?.is_active !== false;
     const isAdminLevel = isAdmin || isStaff;
+    const staffRole: StaffRole | null = isStaff ? (user?.staff_role ?? null) : null;
+    const overrides: ExtraPermissions = user?.extra_permissions ?? {};
+
+    // Permisos base por sub-rol de staff. El admin tiene TODO por
+    // default y los clientes nada. Esta matriz debe coincidir con la
+    // documentada en docs/PRD_STAFF_ROLES.md y la whitelist del RPC
+    // `rpc_set_staff_permission` (migración 016).
+    const baseStaffPerms: Record<StaffRole, Record<PermissionKey, boolean>> = {
+      groundskeeper: {
+        canManageBookings: false,
+        canManageBlocks: true,
+        canManagePricing: false,
+        canManageClubInfo: false,
+        canManageFields: false,
+        canManageVenueConfig: false,
+        canManageTeam: false,
+        canViewReports: false,
+        canManagePayments: false,
+        canManageClients: false,
+      },
+      receptionist: {
+        canManageBookings: true,
+        canManageBlocks: true,
+        canManagePricing: false,
+        canManageClubInfo: false,
+        canManageFields: false,
+        canManageVenueConfig: false,
+        canManageTeam: false,
+        canViewReports: false,
+        canManagePayments: true,
+        canManageClients: true,
+      },
+      accountant: {
+        canManageBookings: false,
+        canManageBlocks: false,
+        canManagePricing: false,
+        canManageClubInfo: false,
+        canManageFields: false,
+        canManageVenueConfig: false,
+        canManageTeam: false,
+        canViewReports: true,
+        canManagePayments: false,
+        canManageClients: false,
+      },
+    };
+
+    // Resolver permiso final: si hay override en el perfil, gana.
+    // Si no hay override, usa el default del rol (admin = todo,
+    // staff con sub-rol = matriz, staff sin sub-rol = legacy permisivo
+    // como antes para no romper cuentas existentes, cliente = nada).
+    const resolve = (key: PermissionKey): boolean => {
+      if (overrides[key] !== undefined) return overrides[key] as boolean;
+      if (isAdmin) return true;
+      if (isStaff) {
+        if (staffRole) return baseStaffPerms[staffRole][key];
+        // Staff sin sub-rol (cuentas pre-migración) — comportamiento
+        // legacy: acceso a bookings y blocks como antes, nada más.
+        return key === 'canManageBookings' || key === 'canManageBlocks';
+      }
+      return false;
+    };
+
     return {
       user,
       login,
@@ -438,13 +515,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       isStaff,
       isAdminLevel,
       staffClubId: user?.staff_club_id ?? null,
-      canManageBookings: isAdminLevel,
-      canManageBlocks: isAdminLevel,
-      canManagePricing: isAdmin,
-      canManageClubInfo: isAdmin,
-      canManageFields: isAdmin,
-      canManageVenueConfig: isAdmin,
-      canManageTeam: isAdmin,
+      staffRole,
+      canManageBookings: resolve('canManageBookings'),
+      canManageBlocks: resolve('canManageBlocks'),
+      canManagePricing: resolve('canManagePricing'),
+      canManageClubInfo: resolve('canManageClubInfo'),
+      canManageFields: resolve('canManageFields'),
+      canManageVenueConfig: resolve('canManageVenueConfig'),
+      canManageTeam: resolve('canManageTeam'),
+      canViewReports: resolve('canViewReports'),
+      canManagePayments: resolve('canManagePayments'),
+      canManageClients: resolve('canManageClients'),
       loading,
       refreshProfile,
     };

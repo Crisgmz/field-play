@@ -45,6 +45,7 @@ const MODALITY_COLORS: Record<string, string> = {
   F11: '#1f6f7a',
   F7: '#2f8a4d',
   F5: '#f59e0b',
+  PADEL: '#0284c7',
 };
 
 export default function ReportsSection() {

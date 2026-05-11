@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Block, Booking, Field, FieldType, User } from '@/types';
 import { TIME_SLOTS } from '@/data/mockData';
 import { formatBlockType, formatBookingStatus, formatCurrency, formatTime12h } from '@/lib/bookingFormat';
@@ -46,6 +46,7 @@ const TYPE_LABEL: Record<FieldType, string> = {
   F11: 'Fútbol 11',
   F7: 'Fútbol 7',
   F5: 'Fútbol 5',
+  PADEL: 'Pádel',
 };
 
 function timeToSlotIdx(time: string): number {
@@ -93,6 +94,42 @@ export default function AdminDailyCalendar({
   onBookingClick,
   onSlotClick,
 }: Props) {
+  // Bloqueo de slots pasados — corre cada minuto para que el calendario
+  // se vaya cerrando solo a medida que avanza la hora. Sólo aplica si
+  // la fecha mostrada es hoy o anterior. Si es futuro, no hay pasado.
+  const [now, setNow] = useState<Date>(() => new Date());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(new Date()), 60 * 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const pastUntilIdx = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const viewed = new Date(`${date}T00:00:00`);
+    viewed.setHours(0, 0, 0, 0);
+
+    // Si la fecha vista es mañana o más, ningún slot está vencido.
+    if (viewed.getTime() > today.getTime()) return -1;
+
+    // Si la fecha vista es anterior a hoy, TODOS los slots están vencidos.
+    if (viewed.getTime() < today.getTime()) return TIME_SLOTS.length;
+
+    // Es hoy: encuentra el último slot cuya hora final ya pasó.
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    let lastPast = -1;
+    for (let i = 0; i < TIME_SLOTS.length - 1; i += 1) {
+      const [h, m] = TIME_SLOTS[i + 1].split(':').map(Number);
+      const endMinutes = h * 60 + m;
+      if (endMinutes <= currentMinutes) {
+        lastPast = i;
+      } else {
+        break;
+      }
+    }
+    return lastPast;
+  }, [date, now]);
+
   const columns = useMemo<ColumnData[]>(() => {
     const cols: ColumnData[] = [];
     fields
@@ -102,7 +139,7 @@ export default function AdminDailyCalendar({
         const orderedUnits = [...field.units]
           .filter((u) => u.is_active !== false)
           .sort((a, b) => {
-            const order: Record<FieldType, number> = { F11: 0, F7: 1, F5: 2 };
+            const order: Record<FieldType, number> = { F11: 0, F7: 1, F5: 2, PADEL: 0 };
             if (order[a.type] !== order[b.type]) return order[a.type] - order[b.type];
             return a.name.localeCompare(b.name);
           });
@@ -262,7 +299,8 @@ export default function AdminDailyCalendar({
                     espacio físico), se renderiza no-clickeable. */}
                 {TIME_SLOTS.slice(0, -1).map((time, idx) => {
                   const isConflicted = col.conflictedTimeIdx.has(idx);
-                  if (isConflicted) {
+                  const isPast = idx <= pastUntilIdx;
+                  if (isConflicted || isPast) {
                     return (
                       <div
                         key={time}
@@ -289,6 +327,33 @@ export default function AdminDailyCalendar({
                 })}
                 {/* Última fila como visual filler */}
                 <div className="border-b border-border/40" style={{ height: SLOT_HEIGHT }} />
+
+                {/* Overlay de horas pasadas: bloque rayado gris oscuro
+                    cubriendo todos los slots vencidos. No clickeable.
+                    Se actualiza cada minuto vía el setInterval del estado
+                    `now` arriba. */}
+                {pastUntilIdx >= 0 && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div
+                        className="pointer-events-auto absolute left-0 right-0 top-0 cursor-not-allowed border-b border-zinc-400/50 bg-zinc-300/40"
+                        style={{
+                          height: (pastUntilIdx + 1) * SLOT_HEIGHT,
+                          backgroundImage:
+                            'repeating-linear-gradient(-45deg, rgba(0,0,0,0) 0 5px, rgba(63,63,70,0.18) 5px 10px)',
+                        }}
+                        aria-label="Hora pasada — no disponible"
+                      >
+                        <div className="sticky top-1 mx-2 inline-flex items-center gap-1 rounded-full bg-zinc-700/85 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white shadow-sm">
+                          Hora pasada
+                        </div>
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent side="right" className="max-w-xs">
+                      <p className="text-xs">Estas horas ya transcurrieron y no pueden reservarse.</p>
+                    </TooltipContent>
+                  </Tooltip>
+                )}
 
                 {/* Overlay de conflictos: rayado gris claro indicando que
                     esa zona está ocupada por una unidad hermana que

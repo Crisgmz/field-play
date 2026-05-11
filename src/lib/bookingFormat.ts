@@ -22,10 +22,42 @@ export function getStatusTone(status: BookingStatus | string | null | undefined)
   return STATUS_TONE[status as BookingStatus] ?? { bg: 'bg-muted', text: 'text-muted-foreground' };
 }
 
+// Sentinel guardado por `rpc_cancel_expired_pending_bookings` para
+// distinguir cancelaciones automáticas (sistema) de las hechas por
+// usuario o admin.
+export const AUTO_EXPIRED_REASON = 'AUTO_EXPIRED';
+
+/**
+ * Devuelve la etiqueta visible del estado considerando el motivo
+ * de cancelación. Las reservas auto-canceladas por vencimiento se
+ * muestran como "No confirmada" en vez de "Cancelada".
+ */
+export function getBookingStatusLabel(
+  booking: { status: BookingStatus | string; cancellation_reason?: string | null },
+): string {
+  if (booking.status === 'cancelled' && booking.cancellation_reason === AUTO_EXPIRED_REASON) {
+    return 'No confirmada';
+  }
+  return formatBookingStatus(booking.status);
+}
+
+/**
+ * Tono visual para badges, considerando también AUTO_EXPIRED.
+ */
+export function getBookingStatusTone(
+  booking: { status: BookingStatus | string; cancellation_reason?: string | null },
+) {
+  if (booking.status === 'cancelled' && booking.cancellation_reason === AUTO_EXPIRED_REASON) {
+    return { bg: 'bg-slate-200', text: 'text-slate-700' };
+  }
+  return getStatusTone(booking.status);
+}
+
 const FIELD_TYPE_LABEL_ES: Record<FieldType, string> = {
   F5: 'Fútbol 5',
   F7: 'Fútbol 7',
   F11: 'Fútbol 11',
+  PADEL: 'Pádel',
 };
 
 export function formatFieldType(type: FieldType | string | null | undefined, full = false): string {

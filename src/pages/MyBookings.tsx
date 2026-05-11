@@ -1,5 +1,5 @@
 import { ChangeEvent, useState } from 'react';
-import { Calendar, MapPin, Clock, Ban, ExternalLink, Upload, Info } from 'lucide-react';
+import { Calendar, MapPin, Clock, Ban, ExternalLink, Loader2, Upload, Info } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAppData } from '@/contexts/AppDataContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -226,7 +226,7 @@ export default function MyBookings() {
                 Volver
               </Button>
               <Button className="flex-1 bg-destructive text-destructive-foreground hover:opacity-90" onClick={submitCancel} disabled={busyId === cancelDialog.id}>
-                {busyId === cancelDialog.id ? 'Cancelando...' : 'Confirmar cancelación'}
+                {busyId === cancelDialog.id ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" />Cancelando...</>) : 'Confirmar cancelación'}
               </Button>
             </div>
           </div>

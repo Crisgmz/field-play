@@ -1,4 +1,4 @@
-import { FieldType, PhysicalSlotId } from './index';
+import { FieldType, PhysicalSlotId, Sport } from './index';
 
 // ── COURT TEMPLATE ─────────────────────────────────────────
 // Defines a reusable court subdivision pattern for a physical field.
@@ -7,6 +7,7 @@ export interface CourtTemplate {
   id: string;
   name: string;
   description: string;
+  sport: Sport;
   units: CourtTemplateUnit[];
 }
 
@@ -25,6 +26,7 @@ export const COURT_TEMPLATES: CourtTemplate[] = [
     id: 'full_11',
     name: 'Solo F11',
     description: 'Cancha completa de fútbol 11 (usa los 6 slots)',
+    sport: 'soccer',
     units: [
       { type: 'F11', name: 'F11', slotIds: ['S1', 'S2', 'S3', 'S4', 'S5', 'S6'], parentIndex: null },
     ],
@@ -33,6 +35,7 @@ export const COURT_TEMPLATES: CourtTemplate[] = [
     id: 'three_7',
     name: '3x Fútbol 7',
     description: '3 canchas de fútbol 7 (pares de slots)',
+    sport: 'soccer',
     units: [
       { type: 'F7', name: 'F7_1', slotIds: ['S1', 'S4'], parentIndex: null },
       { type: 'F7', name: 'F7_2', slotIds: ['S2', 'S5'], parentIndex: null },
@@ -43,6 +46,7 @@ export const COURT_TEMPLATES: CourtTemplate[] = [
     id: 'six_5',
     name: '6x Fútbol 5',
     description: '6 canchas individuales de fútbol 5',
+    sport: 'soccer',
     units: [
       { type: 'F5', name: 'C1', slotIds: ['S1'], parentIndex: null },
       { type: 'F5', name: 'C2', slotIds: ['S2'], parentIndex: null },
@@ -56,6 +60,7 @@ export const COURT_TEMPLATES: CourtTemplate[] = [
     id: 'versatile_full',
     name: 'Versátil completo',
     description: 'Todas las combinaciones: F11 + 3×F7 + 6×F5',
+    sport: 'soccer',
     units: [
       // F11 (index 0)
       { type: 'F11', name: 'F11', slotIds: ['S1', 'S2', 'S3', 'S4', 'S5', 'S6'], parentIndex: null },
@@ -73,6 +78,15 @@ export const COURT_TEMPLATES: CourtTemplate[] = [
       { type: 'F5', name: 'C4', slotIds: ['S4'], parentIndex: 1 },
       { type: 'F5', name: 'C5', slotIds: ['S5'], parentIndex: 2 },
       { type: 'F5', name: 'C6', slotIds: ['S6'], parentIndex: 3 },
+    ],
+  },
+  {
+    id: 'padel_single',
+    name: 'Cancha de pádel',
+    description: 'Una cancha individual de pádel (no se subdivide)',
+    sport: 'padel',
+    units: [
+      { type: 'PADEL', name: 'Pádel', slotIds: [], parentIndex: null },
     ],
   },
 ];

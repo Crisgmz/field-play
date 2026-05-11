@@ -1,3 +1,5 @@
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -6,6 +8,7 @@ const corsHeaders = {
 interface BookingConfirmedRequest {
   email: string;
   firstName?: string;
+  clubId?: string;
   clubName?: string;
   clubLocation?: string;
   fieldName?: string;
@@ -17,6 +20,31 @@ interface BookingConfirmedRequest {
   endTime?: string;
   totalPrice?: number;
   policyHours?: number;
+}
+
+// Resuelve el remitente: si el club tiene `notification_email` configurado
+// (migración 017), construye "Nombre <correo>" con esos valores. Si no,
+// cae al default del entorno. Cualquier error en la lookup → fallback.
+async function resolveFromEmail(clubId: string | undefined, fallback: string): Promise<string> {
+  if (!clubId) return fallback;
+  const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  if (!supabaseUrl || !serviceRoleKey) return fallback;
+  try {
+    const admin = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const { data, error } = await admin
+      .from('clubs')
+      .select('notification_email, notification_sender_name, name')
+      .eq('id', clubId)
+      .maybeSingle();
+    if (error || !data?.notification_email) return fallback;
+    const senderName = data.notification_sender_name?.trim() || data.name?.trim() || 'Field Play';
+    return `${senderName} <${data.notification_email}>`;
+  } catch {
+    return fallback;
+  }
 }
 
 const formatPrice = (value?: number) => {
@@ -63,7 +91,7 @@ Deno.serve(async (req) => {
 
   try {
     const resendApiKey = Deno.env.get('RESEND_API_KEY');
-    const fromEmail = Deno.env.get('BOOKING_EMAIL_FROM') ?? 'Field Play <onboarding@resend.dev>';
+    const fallbackFrom = Deno.env.get('BOOKING_EMAIL_FROM') ?? 'Field Play <onboarding@resend.dev>';
 
     if (!resendApiKey) {
       return new Response(JSON.stringify({ error: 'RESEND_API_KEY is not configured.' }), {
@@ -80,6 +108,8 @@ Deno.serve(async (req) => {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
+
+    const fromEmail = await resolveFromEmail(body.clubId, fallbackFrom);
 
     const resendResponse = await fetch('https://api.resend.com/emails', {
       method: 'POST',

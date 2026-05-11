@@ -19,9 +19,13 @@ export default function FieldConfigPanel({ field, onToggleUnit }: Props) {
   const conflictMap = useMemo(() => buildConflictMap(field.units), [field.units]);
 
   const unitsByType: Record<FieldType, FieldUnit[]> = useMemo(() => {
-    const result: Record<FieldType, FieldUnit[]> = { F11: [], F7: [], F5: [] };
+    const result: Record<FieldType, FieldUnit[]> = { F11: [], F7: [], F5: [], PADEL: [] };
     for (const unit of field.units) {
-      result[unit.type].push(unit);
+      // Defensa por si llega un tipo no esperado en el futuro — preferimos
+      // ignorar la unidad antes que crashear el panel completo.
+      if (result[unit.type]) {
+        result[unit.type].push(unit);
+      }
     }
     return result;
   }, [field.units]);

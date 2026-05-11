@@ -21,7 +21,7 @@ export default function ClubGallery({ clubId, fallbackInitial }: Props) {
   if (images.length === 0) {
     return (
       <div
-        className="flex aspect-[16/7] w-full items-center justify-center rounded-3xl text-white/90"
+        className="flex h-44 w-full items-center justify-center rounded-3xl text-white/90 sm:h-auto sm:aspect-[16/7]"
         style={{ background: FALLBACK_GRADIENT }}
       >
         <span className="font-heading text-7xl">{fallbackInitial ?? '⚽'}</span>
@@ -40,7 +40,7 @@ export default function ClubGallery({ clubId, fallbackInitial }: Props) {
 
   return (
     <>
-      <div className="grid aspect-[16/7] gap-2 overflow-hidden rounded-3xl sm:grid-cols-[1.4fr_1fr]">
+      <div className="grid h-44 gap-2 overflow-hidden rounded-3xl sm:h-auto sm:aspect-[16/7] sm:grid-cols-[1.4fr_1fr]">
         <button
           type="button"
           onClick={() => openAt(0)}

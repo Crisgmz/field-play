@@ -13,6 +13,9 @@ import { Block, BlockType, Booking, BookingStatus, Club, ClubImage, Field, Field
 import { VenueConfig } from '@/types/courtConfig';
 import type { Database } from '@/lib/supabase-types';
 import { createDefaultVenueConfig } from '@/lib/courtConfig';
+// Vite resuelve el archivo como URL. Lo cargamos perezosamente al primer
+// evento de booking para no bajar el .wav si el usuario nunca lo dispara.
+import notificationSoundUrl from '@/components/notifications/mixkit-software-interface-remove-2576.wav';
 
 const CANCELLATION_POLICY_HOURS = 24;
 const PROOF_BUCKET = 'booking-proofs';
@@ -84,17 +87,20 @@ interface UpdateClubInput {
   phone?: string | null;
   email?: string | null;
   amenities?: string[];
+  notification_email?: string | null;
+  notification_sender_name?: string | null;
 }
 
 interface CreateFieldInput {
   club_id: string;
   name: string;
   surface?: string;
-  layout: 'full_11' | 'three_7' | 'six_5' | 'versatile_full';
+  layout: 'full_11' | 'three_7' | 'six_5' | 'versatile_full' | 'padel_single';
   prices?: {
     F5?: number;
     F7?: number;
     F11?: number;
+    PADEL?: number;
   };
 }
 
@@ -142,6 +148,7 @@ interface InviteStaffInput {
   last_name?: string;
   phone?: string;
   club_id: string;
+  staff_role: 'groundskeeper' | 'receptionist' | 'accountant';
 }
 
 interface AppDataContextType {
@@ -186,6 +193,19 @@ interface AppDataContextType {
   fieldCount: number;
   loading: boolean;
   reload: () => Promise<void>;
+  // Popup de nueva reserva pendiente — para que el AppLayout lo monte.
+  newBookingPopup: {
+    id: string;
+    user_id: string;
+    club_id: string;
+    field_unit_id: string;
+    field_type: string;
+    date: string;
+    start_time: string;
+    end_time: string;
+    total_price: number;
+  } | null;
+  dismissNewBookingPopup: () => void;
 }
 
 const AppDataContext = createContext<AppDataContextType | undefined>(undefined);
@@ -213,6 +233,10 @@ function createUnit(fieldId: string, type: FieldType, name: string, slotIds: Phy
 }
 
 function buildFieldUnits(fieldId: string, layout: CreateFieldInput['layout']): FieldUnitInput[] {
+  if (layout === 'padel_single') {
+    return [createUnit(fieldId, 'PADEL', 'Pádel', [])];
+  }
+
   if (layout === 'full_11') {
     return [createUnit(fieldId, 'F11', 'F11', ['S1', 'S2', 'S3', 'S4', 'S5', 'S6'])];
   }
@@ -260,11 +284,40 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [clubImages, setClubImages] = useState<ClubImage[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Popup de nueva reserva: se setea cuando realtime detecta un INSERT
+  // de booking que corresponde a este admin/staff. El componente
+  // NewBookingPopup lo renderiza como dialog y lo descarta via
+  // `dismissNewBookingPopup`. Mantiene apenas el row crudo de la DB.
+  const [newBookingPopup, setNewBookingPopup] = useState<{
+    id: string;
+    user_id: string;
+    club_id: string;
+    field_unit_id: string;
+    field_type: string;
+    date: string;
+    start_time: string;
+    end_time: string;
+    total_price: number;
+  } | null>(null);
+  const notificationAudioRef = useRef<HTMLAudioElement | null>(null);
+
   const reload = async () => {
     setLoading(true);
 
+    // Sweep en cada reload: cancela automáticamente las reservas
+    // pendientes cuyo horario ya pasó. Idempotente y barato — si no
+    // hay nada vencido, devuelve 0. Lo corremos ANTES del fetch para
+    // que la siguiente query traiga los datos ya consolidados.
+    try {
+      await supabase.rpc('rpc_cancel_expired_pending_bookings');
+    } catch (err) {
+      // No bloqueamos el reload si el sweep falla (ej. RPC todavía no
+      // desplegado en este entorno) — los datos se cargan igual.
+      console.warn('No se pudo correr el sweep de pendientes vencidas', err);
+    }
+
     const [profilesRes, clubsRes, pricingRes, fieldsRes, unitsRes, bookingsRes, blocksRes, blockUnitsRes, venueConfigsRes, clubImagesRes] = await Promise.all([
-      supabase.from('profiles').select('id, email, first_name, last_name, phone, national_id, role, staff_club_id, is_active'),
+      supabase.from('profiles').select('id, email, first_name, last_name, phone, national_id, role, staff_club_id, staff_role, extra_permissions, is_active'),
       supabase.from('clubs').select('*').order('created_at', { ascending: false }),
       supabase.from('pricing_rules').select('*'),
       supabase.from('fields').select('*').order('created_at', { ascending: false }),
@@ -277,7 +330,12 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     ]);
 
     const profilesData: User[] = (profilesRes.data ?? []).map((item) => {
-      const extras = item as typeof item & { staff_club_id?: string | null; is_active?: boolean };
+      const extras = item as typeof item & {
+        staff_club_id?: string | null;
+        staff_role?: 'groundskeeper' | 'receptionist' | 'accountant' | null;
+        extra_permissions?: Record<string, boolean> | null;
+        is_active?: boolean;
+      };
       return {
         id: item.id,
         email: item.email,
@@ -287,6 +345,8 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
         national_id: item.national_id,
         role: item.role,
         staff_club_id: extras.staff_club_id ?? null,
+        staff_role: extras.staff_role ?? null,
+        extra_permissions: (extras.extra_permissions ?? {}) as User['extra_permissions'],
         is_active: extras.is_active ?? true,
       };
     });
@@ -302,7 +362,13 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }));
 
     const clubsData: Club[] = (clubsRes.data ?? []).map((item) => {
-      const extras = item as typeof item & { phone?: string | null; email?: string | null; amenities?: string[] | null };
+      const extras = item as typeof item & {
+        phone?: string | null;
+        email?: string | null;
+        amenities?: string[] | null;
+        notification_email?: string | null;
+        notification_sender_name?: string | null;
+      };
       return {
         id: item.id,
         name: item.name,
@@ -318,6 +384,8 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
         phone: extras.phone ?? null,
         email: extras.email ?? null,
         amenities: Array.isArray(extras.amenities) ? extras.amenities : [],
+        notification_email: extras.notification_email ?? null,
+        notification_sender_name: extras.notification_sender_name ?? null,
       };
     });
 
@@ -336,15 +404,19 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       unitsByField.set(item.field_id, current);
     }
 
-    const fieldsData: Field[] = (fieldsRes.data ?? []).map((item) => ({
-      id: item.id,
-      club_id: item.club_id,
-      name: item.name,
-      surface: item.surface ?? undefined,
-      is_active: item.is_active,
-      physical_slots: PHYSICAL_SLOTS,
-      units: unitsByField.get(item.id) ?? [],
-    }));
+    const fieldsData: Field[] = (fieldsRes.data ?? []).map((item) => {
+      const extras = item as typeof item & { sport?: string | null };
+      return {
+        id: item.id,
+        club_id: item.club_id,
+        name: item.name,
+        surface: item.surface ?? undefined,
+        is_active: item.is_active,
+        physical_slots: PHYSICAL_SLOTS,
+        units: unitsByField.get(item.id) ?? [],
+        sport: (extras.sport === 'padel' ? 'padel' : 'soccer'),
+      };
+    });
 
     const blockUnitMap = new Map<string, string[]>();
     for (const item of blockUnitsRes.data ?? []) {
@@ -440,6 +512,25 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     reload();
   }, [user?.id]);
 
+  // ── PERIODIC EXPIRY SWEEP ─────────────────────────────────
+  // Corremos el sweep de pendientes vencidas cada 5 minutos. Si
+  // alguna fila se actualiza, realtime dispara el reload automático
+  // (no necesitamos hacerlo a mano aquí). Si no hay vencidas, es
+  // un no-op barato.
+  useEffect(() => {
+    if (!user) return;
+    const id = window.setInterval(() => {
+      void (async () => {
+        try {
+          await supabase.rpc('rpc_cancel_expired_pending_bookings');
+        } catch {
+          // Silencioso: el reload original ya loguea si la RPC falta.
+        }
+      })();
+    }, 5 * 60 * 1000);
+    return () => window.clearInterval(id);
+  }, [user?.id]);
+
   // ── REALTIME ──────────────────────────────────────────────
   // Suscripción a cambios en las tablas operativas. Cada evento
   // dispara un reload() debounced: si llegan 5 cambios en 300ms (ej.
@@ -480,6 +571,12 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const status = String(row.status ?? '');
       if (status !== 'pending') return;
 
+      // Las reservas creadas manualmente por un admin o empleado desde
+      // el panel (campo `created_by_admin = true`) no deben disparar
+      // notificación — la persona que las creó ya sabe que existen.
+      // Solo notificamos cuando un cliente reservó por la web.
+      if (row.created_by_admin === true) return;
+
       // Para staff: solo si es de su club asignado.
       const bookingClubId = String(row.club_id ?? '');
       if (isStaff && staffClubId && bookingClubId !== staffClubId) return;
@@ -490,6 +587,38 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       toast.info('Nueva reserva pendiente', {
         description: `${fieldType} · ${date} · ${startTime}`,
       });
+
+      // Popup + sonido. El popup lo renderiza NewBookingPopup leyendo
+      // este state desde el context. Si ya había uno abierto, lo
+      // reemplazamos por el más reciente.
+      setNewBookingPopup({
+        id,
+        user_id: String(row.user_id ?? ''),
+        club_id: bookingClubId,
+        field_unit_id: String(row.field_unit_id ?? ''),
+        field_type: fieldType,
+        date,
+        start_time: startTime,
+        end_time: String(row.end_time ?? '').slice(0, 5),
+        total_price: Number(row.total_price ?? 0),
+      });
+
+      // Lazy-init del audio. Los navegadores bloquean autoplay si el
+      // usuario no ha interactuado con la página — capturamos el reject
+      // para no spammear errores en consola.
+      try {
+        if (!notificationAudioRef.current) {
+          notificationAudioRef.current = new Audio(notificationSoundUrl);
+          notificationAudioRef.current.preload = 'auto';
+          notificationAudioRef.current.volume = 0.6;
+        }
+        notificationAudioRef.current.currentTime = 0;
+        void notificationAudioRef.current.play().catch(() => {
+          // Autoplay bloqueado por el navegador — silencioso.
+        });
+      } catch {
+        // Audio API no disponible — silencioso.
+      }
     };
 
     const tables = [
@@ -618,6 +747,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
         await sendBookingReceivedEmail({
           email: user.email,
           firstName: user.first_name,
+          clubId: data.club_id,
           clubName: club?.name,
           fieldName: field?.name,
           unitName: unit?.name,
@@ -649,6 +779,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
           clientName: user ? `${user.first_name} ${user.last_name}`.trim() : undefined,
           clientEmail: user?.email,
           clientPhone: user?.phone,
+          clubId: data.club_id,
           clubName: club?.name,
           fieldName: field?.name,
           unitName: unit?.name,
@@ -734,6 +865,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
         await sendBookingCancelledEmail({
           email: ctx.owner.email,
           firstName: ctx.owner.first_name,
+          clubId: ctx.booking.club_id,
           clubName: ctx.club?.name,
           fieldName: ctx.field?.name,
           unitName: ctx.unit?.name,
@@ -762,6 +894,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       await sendBookingConfirmedEmail({
         email: ctx.owner.email,
         firstName: ctx.owner.first_name,
+        clubId: ctx.booking.club_id,
         clubName: ctx.club?.name,
         clubLocation: ctx.club?.location,
         fieldName: ctx.field?.name,
@@ -820,6 +953,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
         await sendBookingCancelledEmail({
           email: ctx.owner.email,
           firstName: ctx.owner.first_name,
+          clubId: ctx.booking.club_id,
           clubName: ctx.club?.name,
           fieldName: ctx.field?.name,
           unitName: ctx.unit?.name,
@@ -1331,6 +1465,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
         last_name: payload.last_name?.trim() ?? '',
         phone: payload.phone?.trim() ?? '',
         club_id: payload.club_id,
+        staff_role: payload.staff_role,
       },
     });
 
@@ -1404,6 +1539,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
   // ── FIELDS ─────────────────────────────────────────────────
 
   const createField = async (payload: CreateFieldInput) => {
+    const sport: 'soccer' | 'padel' = payload.layout === 'padel_single' ? 'padel' : 'soccer';
     const { data, error } = await supabase
       .from('fields')
       .insert({
@@ -1411,6 +1547,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
         name: payload.name,
         surface: payload.surface || 'Gramilla sintética',
         is_active: true,
+        sport,
       })
       .select('*')
       .single();
@@ -1452,6 +1589,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       name: data.name,
       surface: data.surface ?? undefined,
       is_active: data.is_active,
+      sport,
       physical_slots: PHYSICAL_SLOTS,
       units: insertedUnits.map((u) => ({
         id: u.id,
@@ -1694,7 +1832,9 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     fieldCount: fields.length,
     loading,
     reload,
-  }), [clubs, fields, bookings, blocks, pricingRules, profiles, venueConfigs, clubImages, loading]);
+    newBookingPopup,
+    dismissNewBookingPopup: () => setNewBookingPopup(null),
+  }), [clubs, fields, bookings, blocks, pricingRules, profiles, venueConfigs, clubImages, loading, newBookingPopup]);
 
   return <AppDataContext.Provider value={value}>{children}</AppDataContext.Provider>;
 };

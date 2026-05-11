@@ -1,14 +1,18 @@
 import { useMemo, useState } from 'react';
+import { CircleDot, Target } from 'lucide-react';
 import ClubCard from '@/components/ClubCard';
 import HeroSearchBar, { HeroSearchValue } from '@/components/HeroSearchBar';
 import { ClubGridSkeleton } from '@/components/skeletons';
 import { useAppData } from '@/contexts/AppDataContext';
-import { FieldType } from '@/types';
+import { FieldType, Sport } from '@/types';
 import { getAvailableTimeSlotsV2 } from '@/lib/availability';
+
+type SportFilter = 'all' | Sport;
 
 export default function Home() {
   const { clubs, fields, bookings, blocks, getVenueConfig, loading } = useAppData();
   const [filters, setFilters] = useState<HeroSearchValue>({ location: '', date: '', gameType: '' });
+  const [sportFilter, setSportFilter] = useState<SportFilter>('all');
 
   const locations = useMemo(() => {
     const set = new Set<string>();
@@ -24,7 +28,13 @@ export default function Home() {
 
       if (filters.location && club.location !== filters.location) return false;
 
-      const clubFields = fields.filter((f) => f.club_id === club.id && f.is_active !== false);
+      const clubFields = fields.filter(
+        (f) => f.club_id === club.id
+          && f.is_active !== false
+          && (sportFilter === 'all' || (f.sport ?? 'soccer') === sportFilter),
+      );
+
+      if (sportFilter !== 'all' && clubFields.length === 0) return false;
 
       if (filters.gameType) {
         const hasType = clubFields.some((f) => f.units.some((u) => u.type === filters.gameType && u.is_active !== false));
@@ -34,7 +44,13 @@ export default function Home() {
       if (filters.date) {
         if (clubFields.length === 0) return false;
         const venueConfig = getVenueConfig(club.id);
-        const types: FieldType[] = filters.gameType ? [filters.gameType as FieldType] : ['F5', 'F7', 'F11'];
+        const types: FieldType[] = filters.gameType
+          ? [filters.gameType as FieldType]
+          : sportFilter === 'padel'
+            ? ['PADEL']
+            : sportFilter === 'soccer'
+              ? ['F5', 'F7', 'F11']
+              : ['F5', 'F7', 'F11', 'PADEL'];
         const anyAvailable = clubFields.some((field) =>
           types.some((type) =>
             getAvailableTimeSlotsV2(filters.date, type, field, bookings, blocks, club, venueConfig)
@@ -46,7 +62,7 @@ export default function Home() {
 
       return true;
     });
-  }, [clubs, fields, bookings, blocks, getVenueConfig, filters]);
+  }, [clubs, fields, bookings, blocks, getVenueConfig, filters, sportFilter]);
 
   return (
     <div className="-mx-4 -mt-4 md:-mx-6 md:-mt-6 lg:-mx-8 lg:-mt-8">
@@ -76,6 +92,44 @@ export default function Home() {
 
       <section className="px-4 pt-10 pb-12 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-6xl">
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setSportFilter('all')}
+              className={`rounded-full px-4 py-1.5 text-xs font-semibold transition-colors ${
+                sportFilter === 'all'
+                  ? 'bg-foreground text-background'
+                  : 'border border-border bg-card text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Todos
+            </button>
+            <button
+              type="button"
+              onClick={() => setSportFilter('soccer')}
+              className={`inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-semibold transition-colors ${
+                sportFilter === 'soccer'
+                  ? 'bg-emerald-600 text-white'
+                  : 'border border-border bg-card text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <CircleDot className="h-3.5 w-3.5" />
+              Fútbol
+            </button>
+            <button
+              type="button"
+              onClick={() => setSportFilter('padel')}
+              className={`inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-semibold transition-colors ${
+                sportFilter === 'padel'
+                  ? 'bg-sky-600 text-white'
+                  : 'border border-border bg-card text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <Target className="h-3.5 w-3.5" />
+              Pádel
+            </button>
+          </div>
+
           <div className="mb-5 flex items-end justify-between">
             <div>
               <h2 className="font-heading text-xl font-bold text-foreground">Clubes disponibles</h2>
@@ -104,6 +158,7 @@ export default function Home() {
                   key={club.id}
                   club={club}
                   preselectedType={filters.gameType ? (filters.gameType as FieldType) : null}
+                  preselectedSport={sportFilter === 'all' ? null : sportFilter}
                 />
               ))}
             </div>

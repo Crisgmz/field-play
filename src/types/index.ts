@@ -1,4 +1,21 @@
 export type UserRole = 'client' | 'staff' | 'club_admin';
+export type StaffRole = 'groundskeeper' | 'receptionist' | 'accountant';
+
+// Permisos manejables. La whitelist debe coincidir con la del RPC
+// `rpc_set_staff_permission` (migración 016).
+export type PermissionKey =
+  | 'canManageBookings'
+  | 'canManageBlocks'
+  | 'canManagePricing'
+  | 'canManageClubInfo'
+  | 'canManageFields'
+  | 'canManageVenueConfig'
+  | 'canManageTeam'
+  | 'canViewReports'
+  | 'canManagePayments'
+  | 'canManageClients';
+
+export type ExtraPermissions = Partial<Record<PermissionKey, boolean>>;
 
 export interface User {
   id: string;
@@ -9,6 +26,8 @@ export interface User {
   national_id?: string | null;
   role: UserRole;
   staff_club_id?: string | null;
+  staff_role?: StaffRole | null;
+  extra_permissions?: ExtraPermissions;
   is_active?: boolean;
 }
 
@@ -42,6 +61,10 @@ export interface Club {
   phone?: string | null;
   email?: string | null;
   amenities?: string[];
+  // Remitente para emails de reservas. Si está vacío, se usa el
+  // default global del entorno (BOOKING_EMAIL_FROM).
+  notification_email?: string | null;
+  notification_sender_name?: string | null;
 }
 
 export interface ClubImage {
@@ -53,9 +76,10 @@ export interface ClubImage {
   created_at: string;
 }
 
-export type FieldType = 'F11' | 'F7' | 'F5';
+export type FieldType = 'F11' | 'F7' | 'F5' | 'PADEL';
 export type PhysicalSlotId = 'S1' | 'S2' | 'S3' | 'S4' | 'S5' | 'S6';
 export type PaymentMethod = 'bank_transfer' | 'cash' | 'card';
+export type Sport = 'soccer' | 'padel';
 
 export interface PricingRule {
   id: string;
@@ -86,6 +110,7 @@ export interface Field {
   surface?: string;
   is_active?: boolean;
   physical_slots?: PhysicalSlotId[];
+  sport?: Sport;
 }
 
 export type BookingStatus = 'pending' | 'confirmed' | 'cancelled';
