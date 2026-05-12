@@ -300,6 +300,49 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     total_price: number;
   } | null>(null);
   const notificationAudioRef = useRef<HTMLAudioElement | null>(null);
+  const audioUnlockedRef = useRef<boolean>(false);
+
+  // Unlock del audio: los browsers bloquean `Audio.play()` hasta el
+  // primer gesto del usuario. Al primer click/keydown/touch dentro
+  // de la app, pre-creamos y pre-reproducimos (muted) el audio. Eso
+  // lo deja "desbloqueado" — los siguientes `.play()` reales suenan
+  // sin error. Es un patrón estándar para apps con notif sonora.
+  useEffect(() => {
+    const unlock = () => {
+      if (audioUnlockedRef.current) return;
+      try {
+        if (!notificationAudioRef.current) {
+          notificationAudioRef.current = new Audio(notificationSoundUrl);
+          notificationAudioRef.current.preload = 'auto';
+          notificationAudioRef.current.volume = 0.6;
+        }
+        const audio = notificationAudioRef.current;
+        const previousVolume = audio.volume;
+        audio.volume = 0;
+        void audio.play()
+          .then(() => {
+            audio.pause();
+            audio.currentTime = 0;
+            audio.volume = previousVolume;
+            audioUnlockedRef.current = true;
+            console.log('[notif] audio desbloqueado por interacción del usuario');
+          })
+          .catch(() => {
+            audio.volume = previousVolume;
+          });
+      } catch (err) {
+        console.error('[notif] error al desbloquear audio:', err);
+      }
+    };
+    window.addEventListener('click', unlock, { once: false, passive: true });
+    window.addEventListener('keydown', unlock, { once: false, passive: true });
+    window.addEventListener('touchstart', unlock, { once: false, passive: true });
+    return () => {
+      window.removeEventListener('click', unlock);
+      window.removeEventListener('keydown', unlock);
+      window.removeEventListener('touchstart', unlock);
+    };
+  }, []);
 
   const reload = async () => {
     setLoading(true);
