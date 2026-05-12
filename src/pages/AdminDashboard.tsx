@@ -1287,163 +1287,6 @@ export default function AdminDashboard() {
                 Mostrando <span className="font-semibold text-foreground">{filteredBookings.length}</span> de {bookings.length} reservas.
               </p>
             </div>
-            <Dialog open={Boolean(selectedBookingId)} onOpenChange={(open) => {
-              if (!open) {
-                closeBookingDetails();
-              }
-            }}>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Detalle de reserva</DialogTitle>
-                  <DialogDescription>
-                    Información del cliente y de la reserva seleccionada.
-                  </DialogDescription>
-                </DialogHeader>
-                {selectedBooking && (
-                  <div className="space-y-4 text-sm">
-                    <div className="rounded-2xl bg-muted/50 p-4">
-                      <p className="text-xs text-muted-foreground">Reservó</p>
-                      <p className="mt-1 font-heading text-lg font-bold text-foreground">
-                        {bookingOwner ? `${bookingOwner.first_name} ${bookingOwner.last_name}` : 'Cliente no identificado'}
-                      </p>
-                      <p className="mt-1 text-foreground">{bookingOwner?.email ?? 'Sin correo'}</p>
-                      <p className="text-foreground">{bookingOwner?.phone ?? 'Sin teléfono'}</p>
-                      <p className="text-muted-foreground">Cédula: {bookingOwner?.national_id || 'No registrada'}</p>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="rounded-xl border border-border p-3"><p className="text-xs text-muted-foreground">Tipo</p><p className="mt-1 font-semibold text-foreground">{selectedBooking.field_type}</p></div>
-                      <div className="rounded-xl border border-border p-3"><p className="text-xs text-muted-foreground">Estado</p><p className="mt-1 font-semibold text-foreground">{getBookingStatusLabel(selectedBooking)}</p></div>
-                      <div className="rounded-xl border border-border p-3"><p className="text-xs text-muted-foreground">Fecha</p><p className="mt-1 font-semibold text-foreground">{selectedBooking.date}</p></div>
-                      <div className="rounded-xl border border-border p-3"><p className="text-xs text-muted-foreground">Hora</p><p className="mt-1 font-semibold text-foreground">{formatTime12h(selectedBooking.start_time)} – {formatTime12h(selectedBooking.end_time)}</p></div>
-                    </div>
-                    <div className="rounded-xl bg-accent p-4 text-accent-foreground">
-                      <p className="text-xs">Total</p>
-                      <p className="mt-1 text-xl font-bold">RD$ {selectedBooking.total_price.toLocaleString()}</p>
-                    </div>
-
-                    {selectedBooking.payment_method && (
-                      <div className="rounded-xl border border-border p-3">
-                        <p className="text-xs text-muted-foreground">Método de pago</p>
-                        <p className="mt-1 font-semibold text-foreground">{formatPaymentMethod(selectedBooking.payment_method)}</p>
-                      </div>
-                    )}
-
-                    <div className="rounded-xl border border-border p-3">
-                      <p className="text-xs text-muted-foreground mb-2">Comprobante de pago</p>
-                      {loadingBookingProofUrl ? (
-                        <p className="text-sm text-muted-foreground">Cargando comprobante...</p>
-                      ) : selectedBookingProofUrl ? (
-                        <div className="space-y-2">
-                          {selectedBooking.payment_proof_path?.toLowerCase().endsWith('.pdf') ? (
-                            <iframe src={selectedBookingProofUrl} title="Comprobante de pago" className="h-72 w-full rounded-lg border border-border bg-muted" />
-                          ) : (
-                            <img src={selectedBookingProofUrl} alt="Comprobante de pago" className="max-h-72 w-full rounded-lg border border-border object-contain bg-muted" />
-                          )}
-                          <a href={selectedBookingProofUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-xs font-medium text-primary hover:underline">
-                            <ExternalLink className="h-3.5 w-3.5" /> Abrir en nueva pestaña
-                          </a>
-                          {selectedBooking.proof_replaced_at && (
-                            <p className="text-[11px] text-amber-700">El cliente reemplazó el comprobante el {new Date(selectedBooking.proof_replaced_at).toLocaleString('es-DO')}.</p>
-                          )}
-                        </div>
-                      ) : (
-                        <p className="text-sm text-muted-foreground">No hay comprobante adjunto.</p>
-                      )}
-                    </div>
-
-                    {selectedBooking.rejection_reason && selectedBooking.status === 'cancelled' && (
-                      <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-                        <p className="font-semibold">Motivo del rechazo</p>
-                        <p className="mt-1">{selectedBooking.rejection_reason}</p>
-                      </div>
-                    )}
-                    {selectedBooking.cancellation_reason && selectedBooking.status === 'cancelled' && !selectedBooking.rejection_reason && (
-                      <div className="rounded-xl border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
-                        <p className="font-semibold text-foreground">Motivo de cancelación</p>
-                        <p className="mt-1">{selectedBooking.cancellation_reason}</p>
-                      </div>
-                    )}
-
-                    <div className="flex flex-col gap-2 pt-2">
-                      {/* Botón de Editar visible para reservas no canceladas. Permite
-                          modificar fecha, hora, precio, método de pago y notas. */}
-                      {selectedBooking.status !== 'cancelled' && bookingActionMode === 'idle' && (
-                        <Button
-                          variant="outline"
-                          className="w-full"
-                          onClick={() => setEditBookingId(selectedBooking.id)}
-                        >
-                          Editar reserva
-                        </Button>
-                      )}
-
-                      {selectedBooking.status === 'pending' && bookingActionMode === 'idle' && (
-                        <>
-                          <Button className="w-full bg-emerald-600 text-white hover:bg-emerald-700" onClick={() => void handleConfirmBooking(selectedBooking.id)} disabled={bookingActionBusy}>
-                            {bookingActionBusy ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" />Procesando...</>) : 'Confirmar pago y reserva'}
-                          </Button>
-                          <Button className="w-full bg-destructive text-destructive-foreground hover:opacity-90" onClick={() => { setBookingActionMode('reject'); setBookingActionReason(''); }}>
-                            Rechazar comprobante
-                          </Button>
-                        </>
-                      )}
-
-                      {selectedBooking.status === 'pending' && bookingActionMode === 'reject' && (
-                        <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 space-y-2">
-                          <p className="text-xs font-semibold text-destructive">Motivo del rechazo (lo verá el cliente por correo)</p>
-                          <textarea
-                            value={bookingActionReason}
-                            onChange={(e) => setBookingActionReason(e.target.value)}
-                            rows={3}
-                            placeholder="Ej: el comprobante no coincide con el monto o no se ve la transacción."
-                            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-destructive"
-                          />
-                          <div className="flex gap-2">
-                            <Button variant="outline" className="flex-1" onClick={() => { setBookingActionMode('idle'); setBookingActionReason(''); }} disabled={bookingActionBusy}>
-                              Volver
-                            </Button>
-                            <Button className="flex-1 bg-destructive text-destructive-foreground hover:opacity-90" onClick={() => void handleSubmitRejection(selectedBooking.id)} disabled={bookingActionBusy}>
-                              {bookingActionBusy ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" />Enviando...</>) : 'Rechazar y notificar'}
-                            </Button>
-                          </div>
-                        </div>
-                      )}
-
-                      {selectedBooking.status === 'confirmed' && bookingActionMode === 'idle' && (
-                        <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3">
-                          <p className="text-xs text-muted-foreground">Acción restringida</p>
-                          <p className="mt-1 text-sm text-foreground">Las reservas confirmadas solo pueden cancelarse explícitamente. Se notificará al cliente.</p>
-                          <Button className="mt-3 w-full bg-destructive text-destructive-foreground hover:opacity-90" onClick={() => { setBookingActionMode('cancel-confirmed'); setBookingActionReason(''); }}>
-                            Cancelar reserva confirmada
-                          </Button>
-                        </div>
-                      )}
-
-                      {selectedBooking.status === 'confirmed' && bookingActionMode === 'cancel-confirmed' && (
-                        <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 space-y-2">
-                          <p className="text-xs font-semibold text-destructive">Motivo de la cancelación (opcional, se enviará al cliente)</p>
-                          <textarea
-                            value={bookingActionReason}
-                            onChange={(e) => setBookingActionReason(e.target.value)}
-                            rows={3}
-                            placeholder="Ej: cierre por mantenimiento de emergencia."
-                            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-destructive"
-                          />
-                          <div className="flex gap-2">
-                            <Button variant="outline" className="flex-1" onClick={() => { setBookingActionMode('idle'); setBookingActionReason(''); }} disabled={bookingActionBusy}>
-                              Volver
-                            </Button>
-                            <Button className="flex-1 bg-destructive text-destructive-foreground hover:opacity-90" onClick={() => void handleSubmitCancelConfirmed(selectedBooking.id)} disabled={bookingActionBusy}>
-                              {bookingActionBusy ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" />Cancelando...</>) : 'Cancelar y notificar'}
-                            </Button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </DialogContent>
-            </Dialog>
             <div className="grid gap-3 md:hidden">
               {filteredBookings.length === 0 && (
                 <div className="rounded-2xl border border-dashed border-border bg-card p-6 text-center text-sm text-muted-foreground">
@@ -2539,6 +2382,165 @@ export default function AdminDashboard() {
       </div>
 
       {renderSection()}
+
+      {/* Detalle de reserva — montado al nivel del componente para que
+          esté disponible desde CUALQUIER sección. Antes vivía dentro del
+          `case 'bookings':` y por eso al clickear una reserva en el
+          calendario no se abría sin antes navegar a Reservas. */}
+      <Dialog
+        open={Boolean(selectedBookingId)}
+        onOpenChange={(open) => { if (!open) closeBookingDetails(); }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Detalle de reserva</DialogTitle>
+            <DialogDescription>
+              Información del cliente y de la reserva seleccionada.
+            </DialogDescription>
+          </DialogHeader>
+          {selectedBooking && (
+            <div className="space-y-4 text-sm">
+              <div className="rounded-2xl bg-muted/50 p-4">
+                <p className="text-xs text-muted-foreground">Reservó</p>
+                <p className="mt-1 font-heading text-lg font-bold text-foreground">
+                  {bookingOwner ? `${bookingOwner.first_name} ${bookingOwner.last_name}` : 'Cliente no identificado'}
+                </p>
+                <p className="mt-1 text-foreground">{bookingOwner?.email ?? 'Sin correo'}</p>
+                <p className="text-foreground">{bookingOwner?.phone ?? 'Sin teléfono'}</p>
+                <p className="text-muted-foreground">Cédula: {bookingOwner?.national_id || 'No registrada'}</p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-xl border border-border p-3"><p className="text-xs text-muted-foreground">Tipo</p><p className="mt-1 font-semibold text-foreground">{selectedBooking.field_type}</p></div>
+                <div className="rounded-xl border border-border p-3"><p className="text-xs text-muted-foreground">Estado</p><p className="mt-1 font-semibold text-foreground">{getBookingStatusLabel(selectedBooking)}</p></div>
+                <div className="rounded-xl border border-border p-3"><p className="text-xs text-muted-foreground">Fecha</p><p className="mt-1 font-semibold text-foreground">{selectedBooking.date}</p></div>
+                <div className="rounded-xl border border-border p-3"><p className="text-xs text-muted-foreground">Hora</p><p className="mt-1 font-semibold text-foreground">{formatTime12h(selectedBooking.start_time)} – {formatTime12h(selectedBooking.end_time)}</p></div>
+              </div>
+              <div className="rounded-xl bg-accent p-4 text-accent-foreground">
+                <p className="text-xs">Total</p>
+                <p className="mt-1 text-xl font-bold">RD$ {selectedBooking.total_price.toLocaleString()}</p>
+              </div>
+
+              {selectedBooking.payment_method && (
+                <div className="rounded-xl border border-border p-3">
+                  <p className="text-xs text-muted-foreground">Método de pago</p>
+                  <p className="mt-1 font-semibold text-foreground">{formatPaymentMethod(selectedBooking.payment_method)}</p>
+                </div>
+              )}
+
+              <div className="rounded-xl border border-border p-3">
+                <p className="text-xs text-muted-foreground mb-2">Comprobante de pago</p>
+                {loadingBookingProofUrl ? (
+                  <p className="text-sm text-muted-foreground">Cargando comprobante...</p>
+                ) : selectedBookingProofUrl ? (
+                  <div className="space-y-2">
+                    {selectedBooking.payment_proof_path?.toLowerCase().endsWith('.pdf') ? (
+                      <iframe src={selectedBookingProofUrl} title="Comprobante de pago" className="h-72 w-full rounded-lg border border-border bg-muted" />
+                    ) : (
+                      <img src={selectedBookingProofUrl} alt="Comprobante de pago" className="max-h-72 w-full rounded-lg border border-border object-contain bg-muted" />
+                    )}
+                    <a href={selectedBookingProofUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-xs font-medium text-primary hover:underline">
+                      <ExternalLink className="h-3.5 w-3.5" /> Abrir en nueva pestaña
+                    </a>
+                    {selectedBooking.proof_replaced_at && (
+                      <p className="text-[11px] text-amber-700">El cliente reemplazó el comprobante el {new Date(selectedBooking.proof_replaced_at).toLocaleString('es-DO')}.</p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">No hay comprobante adjunto.</p>
+                )}
+              </div>
+
+              {selectedBooking.rejection_reason && selectedBooking.status === 'cancelled' && (
+                <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+                  <p className="font-semibold">Motivo del rechazo</p>
+                  <p className="mt-1">{selectedBooking.rejection_reason}</p>
+                </div>
+              )}
+              {selectedBooking.cancellation_reason && selectedBooking.status === 'cancelled' && !selectedBooking.rejection_reason && (
+                <div className="rounded-xl border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
+                  <p className="font-semibold text-foreground">Motivo de cancelación</p>
+                  <p className="mt-1">{selectedBooking.cancellation_reason}</p>
+                </div>
+              )}
+
+              <div className="flex flex-col gap-2 pt-2">
+                {selectedBooking.status !== 'cancelled' && bookingActionMode === 'idle' && (
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => setEditBookingId(selectedBooking.id)}
+                  >
+                    Editar reserva
+                  </Button>
+                )}
+
+                {selectedBooking.status === 'pending' && bookingActionMode === 'idle' && (
+                  <>
+                    <Button className="w-full bg-emerald-600 text-white hover:bg-emerald-700" onClick={() => void handleConfirmBooking(selectedBooking.id)} disabled={bookingActionBusy}>
+                      {bookingActionBusy ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" />Procesando...</>) : 'Confirmar pago y reserva'}
+                    </Button>
+                    <Button className="w-full bg-destructive text-destructive-foreground hover:opacity-90" onClick={() => { setBookingActionMode('reject'); setBookingActionReason(''); }}>
+                      Rechazar comprobante
+                    </Button>
+                  </>
+                )}
+
+                {selectedBooking.status === 'pending' && bookingActionMode === 'reject' && (
+                  <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 space-y-2">
+                    <p className="text-xs font-semibold text-destructive">Motivo del rechazo (lo verá el cliente por correo)</p>
+                    <textarea
+                      value={bookingActionReason}
+                      onChange={(e) => setBookingActionReason(e.target.value)}
+                      rows={3}
+                      placeholder="Ej: el comprobante no coincide con el monto o no se ve la transacción."
+                      className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-destructive"
+                    />
+                    <div className="flex gap-2">
+                      <Button variant="outline" className="flex-1" onClick={() => { setBookingActionMode('idle'); setBookingActionReason(''); }} disabled={bookingActionBusy}>
+                        Volver
+                      </Button>
+                      <Button className="flex-1 bg-destructive text-destructive-foreground hover:opacity-90" onClick={() => void handleSubmitRejection(selectedBooking.id)} disabled={bookingActionBusy}>
+                        {bookingActionBusy ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" />Enviando...</>) : 'Rechazar y notificar'}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {selectedBooking.status === 'confirmed' && bookingActionMode === 'idle' && (
+                  <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3">
+                    <p className="text-xs text-muted-foreground">Acción restringida</p>
+                    <p className="mt-1 text-sm text-foreground">Las reservas confirmadas solo pueden cancelarse explícitamente. Se notificará al cliente.</p>
+                    <Button className="mt-3 w-full bg-destructive text-destructive-foreground hover:opacity-90" onClick={() => { setBookingActionMode('cancel-confirmed'); setBookingActionReason(''); }}>
+                      Cancelar reserva confirmada
+                    </Button>
+                  </div>
+                )}
+
+                {selectedBooking.status === 'confirmed' && bookingActionMode === 'cancel-confirmed' && (
+                  <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 space-y-2">
+                    <p className="text-xs font-semibold text-destructive">Motivo de la cancelación (opcional, se enviará al cliente)</p>
+                    <textarea
+                      value={bookingActionReason}
+                      onChange={(e) => setBookingActionReason(e.target.value)}
+                      rows={3}
+                      placeholder="Ej: cierre por mantenimiento de emergencia."
+                      className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-destructive"
+                    />
+                    <div className="flex gap-2">
+                      <Button variant="outline" className="flex-1" onClick={() => { setBookingActionMode('idle'); setBookingActionReason(''); }} disabled={bookingActionBusy}>
+                        Volver
+                      </Button>
+                      <Button className="flex-1 bg-destructive text-destructive-foreground hover:opacity-90" onClick={() => void handleSubmitCancelConfirmed(selectedBooking.id)} disabled={bookingActionBusy}>
+                        {bookingActionBusy ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" />Cancelando...</>) : 'Cancelar y notificar'}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <EditBookingDialog
         booking={bookings.find((b) => b.id === editBookingId) ?? null}

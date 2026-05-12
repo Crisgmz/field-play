@@ -1486,7 +1486,10 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       .select('*')
       .single();
 
-    if (error || !data) return null;
+    if (error || !data) {
+      console.error('Error inserting club:', error);
+      return null;
+    }
 
     const { error: pricingError } = await supabase.from('pricing_rules').insert([
       { club_id: data.id, field_type: 'F5', price_per_hour: 3000, minimum_minutes: 60, increment_minutes: 30, is_active: true },
