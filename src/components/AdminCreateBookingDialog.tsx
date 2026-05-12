@@ -72,8 +72,11 @@ export default function AdminCreateBookingDialog({ open, onOpenChange, initialVa
 
   useDialogBackButton(open, () => onOpenChange(false));
 
+  // Clubes que el usuario puede operar:
+  //   - club_admin: los clubes que posee
+  //   - staff (cualquier sub-rol): solo su club asignado
   const ownedClubs = useMemo(() => {
-    if (isStaff && staffClubId) return clubs.filter((c) => c.id === staffClubId);
+    if (isStaff && staffClubId) return clubs.filter((c) => c.id === staffClubId && c.is_active);
     return clubs.filter((c) => c.owner_id === user?.id && c.is_active);
   }, [clubs, user?.id, isStaff, staffClubId]);
 

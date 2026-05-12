@@ -52,10 +52,16 @@ export default function ReportsSection() {
   const { user } = useAuth();
   const { clubs, fields, bookings, blocks, profiles, getVenueConfig, loading } = useAppData();
 
-  // Filtros
+  // Filtros — el reporte abarca clubes del club_admin (todos los que
+  // posee) o el club asignado al staff (cualquier sub-rol, incluyendo
+  // contable y admin).
   const ownedClubs = useMemo(
-    () => clubs.filter((c) => c.owner_id === user?.id),
-    [clubs, user?.id],
+    () => clubs.filter((c) => {
+      if (c.owner_id === user?.id) return true;
+      if (user?.role === 'staff' && c.id === user?.staff_club_id) return true;
+      return false;
+    }),
+    [clubs, user?.id, user?.role, user?.staff_club_id],
   );
   const [clubId, setClubId] = useState<string>(ownedClubs[0]?.id ?? 'all');
   const [preset, setPreset] = useState<RangePreset>('30d');

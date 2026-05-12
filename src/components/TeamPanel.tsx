@@ -91,9 +91,18 @@ export default function TeamPanel() {
   const { user } = useAuth();
   const { clubs, profiles, inviteStaff, setStaffActive, removeStaff } = useAppData();
 
+  // El admin propietario (`role=club_admin`) ve sus clubes. El staff
+  // con sub-rol 'admin' tiene permisos de admin sobre el club al que
+  // está asignado vía `staff_club_id` — lo incluimos para que pueda
+  // gestionar el equipo y crear empleados de ese club.
   const ownedClubs = useMemo(
-    () => clubs.filter((club) => club.owner_id === user?.id && club.is_active),
-    [clubs, user?.id],
+    () => clubs.filter((club) => {
+      if (!club.is_active) return false;
+      if (club.owner_id === user?.id) return true;
+      if (user?.role === 'staff' && user?.staff_role === 'admin' && club.id === user?.staff_club_id) return true;
+      return false;
+    }),
+    [clubs, user?.id, user?.role, user?.staff_role, user?.staff_club_id],
   );
 
   const [inviteOpen, setInviteOpen] = useState(false);
