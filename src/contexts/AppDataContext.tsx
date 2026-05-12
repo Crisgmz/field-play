@@ -531,6 +531,81 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return () => window.clearInterval(id);
   }, [user?.id]);
 
+  // ── PERIODIC POLLING FOR NEW BOOKINGS ─────────────────────
+  // Fallback a Realtime: cada 10 segundos revisamos si hay reservas pendientes
+  // que no conocíamos, para disparar la notificación y actualizar la tabla.
+  useEffect(() => {
+    if (!user || (!isAdmin && !isStaff)) return;
+    
+    const id = window.setInterval(() => {
+      void (async () => {
+        try {
+          const { data, error } = await supabase
+            .from('bookings')
+            .select('*')
+            .eq('status', 'pending');
+            
+          if (error || !data) return;
+          
+          let hasNew = false;
+          
+          for (const row of data) {
+            const rowId = String(row.id);
+            if (!knownBookingIdsRef.current.has(rowId)) {
+              if (row.created_by_admin === true) continue;
+              
+              const bookingClubId = String(row.club_id ?? '');
+              if (isStaff && staffClubId && bookingClubId !== staffClubId) continue;
+              
+              knownBookingIdsRef.current.add(rowId);
+              hasNew = true;
+              
+              const fieldType = String(row.field_type ?? '');
+              const date = String(row.date ?? '');
+              const startTime = String(row.start_time ?? '').slice(0, 5);
+              
+              toast.info('Nueva reserva pendiente', {
+                description: `${fieldType} · ${date} · ${startTime}`,
+              });
+
+              setNewBookingPopup({
+                id: rowId,
+                user_id: String(row.user_id ?? ''),
+                club_id: bookingClubId,
+                field_unit_id: String(row.field_unit_id ?? ''),
+                field_type: fieldType,
+                date,
+                start_time: startTime,
+                end_time: String(row.end_time ?? '').slice(0, 5),
+                total_price: Number(row.total_price ?? 0),
+              });
+
+              try {
+                if (!notificationAudioRef.current) {
+                  notificationAudioRef.current = new Audio(notificationSoundUrl);
+                  notificationAudioRef.current.preload = 'auto';
+                  notificationAudioRef.current.volume = 0.6;
+                }
+                notificationAudioRef.current.currentTime = 0;
+                void notificationAudioRef.current.play()
+                  .catch((err) => console.warn('[notif] audio bloqueado por el browser:', err));
+              } catch (err) {
+                console.error('[notif] error al reproducir audio:', err);
+              }
+            }
+          }
+          
+          if (hasNew) {
+            void reload();
+          }
+        } catch (err) {
+          console.error('Error en polling de bookings:', err);
+        }
+      })();
+    }, 10 * 1000);
+    return () => window.clearInterval(id);
+  }, [user?.id, isAdmin, isStaff, staffClubId]);
+
   // ── REALTIME ──────────────────────────────────────────────
   // Suscripción a cambios en las tablas operativas. Cada evento
   // dispara un reload() debounced: si llegan 5 cambios en 300ms (ej.
