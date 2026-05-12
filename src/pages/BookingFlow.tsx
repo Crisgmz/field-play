@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import FieldModeSelector from '@/components/FieldModeSelector';
 import TimeSlotPicker from '@/components/TimeSlotPicker';
 import ClubGallery from '@/components/ClubGallery';
-import { findAvailableUnit, getAvailableTimeSlotsV2, getUnitOptions, getUnitsByType } from '@/lib/availability';
+import { enforceClientTimeRestriction, findAvailableUnit, getAvailableTimeSlotsV2, getUnitOptions, getUnitsByType } from '@/lib/availability';
 import { formatTime12h } from '@/lib/bookingFormat';
 import { useAppData } from '@/contexts/AppDataContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -130,7 +130,7 @@ export default function BookingFlow() {
   const fallbackTimeline = selectedMode && field
     ? getAvailableTimeSlotsV2(selectedDate, selectedMode, field, bookings, blocks, club, venueConfig)
     : [];
-  const timeline = serverTimeline ?? fallbackTimeline;
+  const timeline = enforceClientTimeRestriction(serverTimeline ?? fallbackTimeline, selectedDate);
 
   const sortedHours = [...selectedHours].sort();
   const startTime = sortedHours[0];

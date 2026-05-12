@@ -123,11 +123,12 @@ export function getAvailableTimeSlotsV2(
   blocks: Block[],
   club: Club | null,
   venueConfig: VenueConfig | null,
+  isAdmin: boolean = false,
 ): TimeSlot[] {
   const timeSlots = resolveTimeSlots(date, club, venueConfig);
   const totalUnits = getUnitsByType(field, fieldType).length;
 
-  return timeSlots.slice(0, -1).map((start, index) => {
+  const slots = timeSlots.slice(0, -1).map((start, index) => {
     const end = timeSlots[index + 1];
     const availableUnits = getUnitOptions(date, start, end, fieldType, field, bookings, blocks)
       .filter((option) => option.available).length;
@@ -140,6 +141,8 @@ export function getAvailableTimeSlotsV2(
       totalUnits,
     };
   });
+
+  return enforceClientTimeRestriction(slots, date, isAdmin);
 }
 
 // ── LEGACY: Original function preserved for backward compatibility ──
@@ -150,10 +153,11 @@ export function getAvailableTimeSlots(
   field: Field,
   bookings: Booking[],
   blocks: Block[],
+  isAdmin: boolean = false,
 ): TimeSlot[] {
   const totalUnits = getUnitsByType(field, fieldType).length;
 
-  return TIME_SLOTS.slice(0, -1).map((start, index) => {
+  const slots = TIME_SLOTS.slice(0, -1).map((start, index) => {
     const end = TIME_SLOTS[index + 1];
     const availableUnits = getUnitOptions(date, start, end, fieldType, field, bookings, blocks)
       .filter((option) => option.available).length;
@@ -165,6 +169,31 @@ export function getAvailableTimeSlots(
       availableUnits,
       totalUnits,
     };
+  });
+
+  return enforceClientTimeRestriction(slots, date, isAdmin);
+}
+
+export function enforceClientTimeRestriction(slots: TimeSlot[], date: string, isAdmin: boolean = false): TimeSlot[] {
+  if (isAdmin) return slots;
+  
+  const now = new Date();
+  
+  return slots.map(slot => {
+    if (!slot.available) return slot;
+    
+    const slotDateTime = new Date(`${date}T${slot.start}:00`);
+    const diffMinutes = (slotDateTime.getTime() - now.getTime()) / (1000 * 60);
+    
+    if (diffMinutes < 30) {
+      return {
+        ...slot,
+        available: false,
+        availableUnits: 0
+      };
+    }
+    
+    return slot;
   });
 }
 
