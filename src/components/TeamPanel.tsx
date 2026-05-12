@@ -32,6 +32,7 @@ const STAFF_ROLE_LABELS: Record<StaffRole, { label: string; short: string; tone:
   groundskeeper: { label: 'Encargado de cancha', short: 'Encargado', tone: 'bg-emerald-50 text-emerald-700' },
   receptionist: { label: 'Recepción / Secretaria', short: 'Recepción', tone: 'bg-sky-50 text-sky-700' },
   accountant: { label: 'Contable', short: 'Contable', tone: 'bg-violet-50 text-violet-700' },
+  admin: { label: 'Administrador', short: 'Admin', tone: 'bg-rose-50 text-rose-700' },
 };
 
 // Matriz base por sub-rol (mismo contenido que AuthContext). Aquí solo
@@ -52,6 +53,11 @@ const BASE_STAFF_PERMS: Record<StaffRole, Record<PermissionKey, boolean>> = {
     canManageBookings: false, canManageBlocks: false, canManagePricing: false,
     canManageClubInfo: false, canManageFields: false, canManageVenueConfig: false,
     canManageTeam: false, canViewReports: true, canManagePayments: false, canManageClients: false,
+  },
+  admin: {
+    canManageBookings: true, canManageBlocks: true, canManagePricing: true,
+    canManageClubInfo: true, canManageFields: true, canManageVenueConfig: true,
+    canManageTeam: true, canViewReports: true, canManagePayments: true, canManageClients: true,
   },
 };
 
@@ -525,11 +531,12 @@ export default function TeamPanel() {
 
             <div>
               <label className="mb-1 block text-xs text-muted-foreground">Tipo de empleado</label>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 {([
                   { value: 'groundskeeper', label: 'Encargado de cancha', desc: 'Agenda + bloqueos' },
                   { value: 'receptionist', label: 'Recepción / Secretaria', desc: 'Reservas + pagos' },
                   { value: 'accountant', label: 'Contable', desc: 'Solo reportes' },
+                  { value: 'admin', label: 'Administrador', desc: 'Todos los permisos' },
                 ] as const).map((opt) => {
                   const active = form.staff_role === opt.value;
                   return (

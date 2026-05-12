@@ -102,7 +102,7 @@ async function loadProfile(session: Session | null): Promise<User | null> {
 
   const query = supabase
     .from('profiles')
-    .select('id, email, first_name, last_name, phone, national_id, role, staff_club_id, staff_role, extra_permissions, is_active')
+    .select('id, email, first_name, last_name, phone, national_id, role, staff_club_id, staff_role, extra_permissions, is_active, must_change_password')
     .eq('id', session.user.id)
     .maybeSingle();
 
@@ -126,6 +126,7 @@ async function loadProfile(session: Session | null): Promise<User | null> {
     staff_role?: StaffRole | null;
     extra_permissions?: ExtraPermissions | null;
     is_active?: boolean;
+    must_change_password?: boolean;
   };
   return {
     id: data.id,
@@ -139,6 +140,7 @@ async function loadProfile(session: Session | null): Promise<User | null> {
     staff_role: extras.staff_role ?? null,
     extra_permissions: extras.extra_permissions ?? {},
     is_active: extras.is_active ?? true,
+    must_change_password: extras.must_change_password ?? false,
   };
 }
 
@@ -484,6 +486,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         canViewReports: true,
         canManagePayments: false,
         canManageClients: false,
+      },
+      // El sub-rol 'admin' tiene TODOS los permisos. Equivalente al
+      // club_admin en términos de UI, pero internamente sigue siendo
+      // `role='staff'`. La RLS también lo trata como admin gracias
+      // a `is_club_admin()` actualizado en la migración 020.
+      admin: {
+        canManageBookings: true,
+        canManageBlocks: true,
+        canManagePricing: true,
+        canManageClubInfo: true,
+        canManageFields: true,
+        canManageVenueConfig: true,
+        canManageTeam: true,
+        canViewReports: true,
+        canManagePayments: true,
+        canManageClients: true,
       },
     };
 

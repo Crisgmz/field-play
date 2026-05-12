@@ -1,5 +1,5 @@
 export type UserRole = 'client' | 'staff' | 'club_admin';
-export type StaffRole = 'groundskeeper' | 'receptionist' | 'accountant';
+export type StaffRole = 'groundskeeper' | 'receptionist' | 'accountant' | 'admin';
 
 // Permisos manejables. La whitelist debe coincidir con la del RPC
 // `rpc_set_staff_permission` (migración 016).
@@ -29,6 +29,7 @@ export interface User {
   staff_role?: StaffRole | null;
   extra_permissions?: ExtraPermissions;
   is_active?: boolean;
+  must_change_password?: boolean;
 }
 
 export interface LoginInput {

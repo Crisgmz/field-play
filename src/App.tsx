@@ -18,6 +18,7 @@ import Profile from "@/pages/Profile";
 import AdminDashboard from "@/pages/AdminDashboard";
 import NotFound from "./pages/NotFound";
 import ErrorBoundary from "@/components/ErrorBoundary";
+import ForceChangePassword from "@/components/ForceChangePassword";
 import logoUrl from "@/logos/logo.png";
 
 const queryClient = new QueryClient();
@@ -117,6 +118,13 @@ function AppRoutes() {
   // el flicker post-login: el route guard de /login ya redirige al
   // panel correcto en vez de pasar primero por '/'.
   const authenticatedHome = isAdminLevel ? '/admin/overview' : '/';
+
+  // Si el usuario fue creado con una contraseña inicial (empleados),
+  // su profile tiene `must_change_password=true` y debe rotarla antes
+  // de poder usar la app. Bloqueamos toda la UI hasta que lo haga.
+  if (user?.must_change_password) {
+    return <ForceChangePassword />;
+  }
 
   return (
     <Routes>

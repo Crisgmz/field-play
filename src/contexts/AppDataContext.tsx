@@ -1626,59 +1626,145 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // ── TEAM / STAFF ───────────────────────────────────────────
 
+  // Crea un empleado directamente desde el cliente (sin edge function).
+  //
+  // Flujo:
+  //   1. Si ya existe un profile con ese email → UPDATE para hacerlo
+  //      staff de este club (caso "upgrade" de cliente existente).
+  //   2. Si NO existe → `supabase.auth.signUp()` con metadata que
+  //      incluye role, staff_club_id, staff_role. El trigger
+  //      `handle_new_user` (migración 019) inserta el profile con
+  //      todo lo necesario.
+  //   3. Como signUp reemplaza la sesión actual con la del nuevo
+  //      usuario, guardamos los tokens del admin antes y los
+  //      restauramos con setSession() después.
   const inviteStaff = async (payload: InviteStaffInput): Promise<InviteStaffResult> => {
     if (!user) return { ok: false, message: 'No hay sesión activa.' };
-    const { data, error } = await supabase.functions.invoke('invite-staff', {
-      body: {
-        email: payload.email.trim().toLowerCase(),
-        password: payload.password,
-        first_name: payload.first_name.trim(),
-        last_name: payload.last_name?.trim() ?? '',
-        phone: payload.phone?.trim() ?? '',
-        club_id: payload.club_id,
-        staff_role: payload.staff_role,
+
+    const email = payload.email.trim().toLowerCase();
+    if (!payload.password || payload.password.length < 8) {
+      return { ok: false, message: 'La contraseña debe tener al menos 8 caracteres.' };
+    }
+
+    // 1) Caso UPGRADE — el email ya pertenece a otro profile.
+    const { data: existingProfile } = await supabase
+      .from('profiles')
+      .select('id, role, staff_club_id, email')
+      .eq('email', email)
+      .maybeSingle();
+
+    if (existingProfile) {
+      if (existingProfile.role === 'club_admin') {
+        return { ok: false, message: 'Este email pertenece a otro administrador y no puede ser asignado como empleado.' };
+      }
+      if (existingProfile.role === 'staff' && existingProfile.staff_club_id !== payload.club_id) {
+        return { ok: false, message: 'Este email ya está asignado como empleado a otro club.' };
+      }
+
+      const { error: upgradeErr } = await supabase
+        .from('profiles')
+        .update({
+          role: 'staff',
+          staff_club_id: payload.club_id,
+          staff_role: payload.staff_role,
+          is_active: true,
+          first_name: payload.first_name.trim(),
+          last_name: payload.last_name?.trim() ?? '',
+          phone: payload.phone?.trim() ?? '',
+          // No forzamos cambio para upgrades — el usuario ya tiene
+          // su propia contraseña desde antes (es un cliente que ya
+          // usaba la plataforma). El admin solo está cambiando su rol.
+        })
+        .eq('id', existingProfile.id);
+
+      if (upgradeErr) {
+        console.error('Error upgrading profile:', upgradeErr);
+        return { ok: false, message: `No se pudo actualizar el perfil: ${upgradeErr.message}` };
+      }
+
+      await reload();
+      return {
+        ok: true,
+        mode: 'upgraded',
+        userId: existingProfile.id,
+        message: 'La cuenta ya existía y se actualizó a empleado. El usuario debe iniciar sesión con su contraseña actual.',
+      };
+    }
+
+    // 2) Caso CREATE — guardar sesión admin, signUp, restaurar sesión.
+    const { data: sessionData } = await supabase.auth.getSession();
+    const adminSession = sessionData.session;
+    if (!adminSession) {
+      return { ok: false, message: 'Tu sesión expiró. Vuelve a iniciar sesión.' };
+    }
+
+    const { data: signUpData, error: signUpErr } = await supabase.auth.signUp({
+      email,
+      password: payload.password,
+      options: {
+        data: {
+          first_name: payload.first_name.trim(),
+          last_name: payload.last_name?.trim() ?? '',
+          phone: payload.phone?.trim() ?? '',
+          role: 'staff',
+          staff_club_id: payload.club_id,
+          staff_role: payload.staff_role,
+          // El trigger handle_new_user (migración 020) leerá este flag
+          // y lo grabará en profiles.must_change_password. Forzamos al
+          // empleado a cambiar la contraseña inicial en su primer login.
+          must_change_password: true,
+        },
       },
     });
 
-    // supabase-js convierte cualquier respuesta no-2xx en `error`. El body
-    // real (con nuestro mensaje en español) viene en error.context, que es
-    // un Response. Hay que parsearlo para mostrar el motivo concreto.
-    if (error) {
-      console.error('inviteStaff edge function error:', error);
-      let serverMessage: string | null = null;
-      try {
-        const ctx = (error as unknown as { context?: Response }).context;
-        if (ctx && typeof ctx.json === 'function') {
-          const body = await ctx.json();
-          serverMessage = body?.error ?? body?.details ?? body?.message ?? null;
-        }
-      } catch (parseErr) {
-        console.error('No se pudo parsear el body del error:', parseErr);
-      }
-
-      if (serverMessage) {
-        return { ok: false, message: serverMessage };
-      }
-      if (error.message?.toLowerCase().includes('not found') || error.message?.toLowerCase().includes('failed to send')) {
-        return {
-          ok: false,
-          message: 'La función "invite-staff" no responde. Verifica que esté desplegada (supabase functions deploy invite-staff) y que SUPABASE_SERVICE_ROLE_KEY esté configurada.',
-        };
-      }
-      return { ok: false, message: `No se pudo crear el empleado: ${error.message}` };
+    // Restauramos la sesión admin SIEMPRE — pase lo que pase con
+    // signUp — para que el usuario actual siga siendo el admin.
+    try {
+      await supabase.auth.setSession({
+        access_token: adminSession.access_token,
+        refresh_token: adminSession.refresh_token,
+      });
+    } catch (restoreErr) {
+      console.error('No se pudo restaurar la sesión admin:', restoreErr);
     }
 
-    const result = data as { ok?: boolean; mode?: 'created' | 'upgraded'; user_id?: string; message?: string; error?: string };
-    if (!result?.ok) {
-      return { ok: false, message: result?.error ?? 'No se pudo crear el empleado.' };
+    if (signUpErr) {
+      console.error('Error en signUp del empleado:', signUpErr);
+      if (signUpErr.message?.toLowerCase().includes('already registered')
+          || signUpErr.message?.toLowerCase().includes('already exists')) {
+        return { ok: false, message: 'Ya existe una cuenta con ese email. Si quieres convertirla en empleado, asegúrate de que aparezca en el listado de clientes y vuelve a intentar.' };
+      }
+      return { ok: false, message: `No se pudo crear el empleado: ${signUpErr.message}` };
+    }
+
+    const newUserId = signUpData.user?.id;
+    if (!newUserId) {
+      return { ok: false, message: 'El empleado fue creado pero no se obtuvo su ID. Recarga e inténtalo de nuevo.' };
+    }
+
+    // Por seguridad, hacemos un UPDATE post-signUp para garantizar
+    // que staff_role y must_change_password quedaron grabados aunque
+    // el trigger fallara o hubiera una versión vieja del trigger.
+    const { error: profileFixErr } = await supabase
+      .from('profiles')
+      .update({
+        role: 'staff',
+        staff_club_id: payload.club_id,
+        staff_role: payload.staff_role,
+        is_active: true,
+        must_change_password: true,
+      })
+      .eq('id', newUserId);
+    if (profileFixErr) {
+      console.warn('No se pudo asegurar staff_role en el profile:', profileFixErr.message);
     }
 
     await reload();
     return {
       ok: true,
-      mode: result.mode ?? 'created',
-      userId: result.user_id ?? '',
-      message: result.message ?? 'Empleado creado.',
+      mode: 'created',
+      userId: newUserId,
+      message: 'Empleado creado correctamente. Comparte el email y contraseña con tu empleado.',
     };
   };
 
