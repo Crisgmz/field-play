@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { AuthChangeEvent, Session } from '@supabase/supabase-js';
-import { ExtraPermissions, LoginInput, PermissionKey, RegisterInput, StaffRole, User } from '@/types';
+import { ExtraPermissions, LoginInput, PermissionKey, RegisterInput, StaffRole, User, UserRole } from '@/types';
 import { supabase } from '@/lib/supabase';
 import { sendRegistrationWelcomeEmail } from '@/lib/bookingEmail';
 
@@ -100,47 +100,92 @@ function withTimeout<T>(thenable: PromiseLike<T>, ms: number, label: string): Pr
 async function loadProfile(session: Session | null): Promise<User | null> {
   if (!session?.user) return null;
 
-  const query = supabase
-    .from('profiles')
-    .select('id, email, first_name, last_name, phone, national_id, role, staff_club_id, staff_role, extra_permissions, is_active, must_change_password')
-    .eq('id', session.user.id)
-    .maybeSingle();
+  // Intentamos el SELECT con TODAS las columnas (incluye las
+  // agregadas por migraciones recientes). Si la migración no está
+  // aplicada en este entorno, Postgres tira "column does not exist"
+  // y caemos al fallback con el set mínimo de columnas estables.
+  // Eso evita que un deploy de código adelantado a su migración
+  // rompa el login completo.
+  const FULL_COLUMNS = 'id, email, first_name, last_name, phone, national_id, role, staff_club_id, staff_role, extra_permissions, is_active, must_change_password, has_seen_onboarding';
+  const CORE_COLUMNS = 'id, email, first_name, last_name, phone, national_id, role, staff_club_id, is_active';
 
-  let data: Awaited<typeof query>['data'];
-  let error: Awaited<typeof query>['error'];
+  let data: Record<string, unknown> | null = null;
+  let error: { message?: string; code?: string } | null = null;
+
   try {
-    const result = await withTimeout(query, PROFILE_QUERY_TIMEOUT_MS, 'loadProfile');
-    data = result.data;
+    const result = await withTimeout(
+      supabase
+        .from('profiles')
+        .select(FULL_COLUMNS)
+        .eq('id', session.user.id)
+        .maybeSingle(),
+      PROFILE_QUERY_TIMEOUT_MS,
+      'loadProfile',
+    );
+    data = result.data as Record<string, unknown> | null;
     error = result.error;
   } catch (err) {
     console.error('loadProfile timeout/error:', err);
     return null;
   }
 
+  // Si el error sugiere columna faltante, reintentamos con el set
+  // mínimo. Cubre el caso de "deploy en frente a la migración".
+  if (error && (error.code === '42703' || error.message?.toLowerCase().includes('does not exist'))) {
+    console.warn('loadProfile: columna faltante en profiles, usando fallback. Aplica las migraciones pendientes.', error.message);
+    try {
+      const fallback = await withTimeout(
+        supabase
+          .from('profiles')
+          .select(CORE_COLUMNS)
+          .eq('id', session.user.id)
+          .maybeSingle(),
+        PROFILE_QUERY_TIMEOUT_MS,
+        'loadProfile-fallback',
+      );
+      data = fallback.data as Record<string, unknown> | null;
+      error = fallback.error;
+    } catch (err) {
+      console.error('loadProfile fallback timeout/error:', err);
+      return null;
+    }
+  }
+
   if (error || !data) {
     return null;
   }
 
-  const extras = data as typeof data & {
+  // Cast a un shape conocido; las columnas opcionales podrían ser
+  // undefined si entramos por el fallback (migraciones pendientes).
+  const row = data as {
+    id: string;
+    email: string;
+    first_name: string;
+    last_name: string;
+    phone: string;
+    national_id?: string | null;
+    role: UserRole;
     staff_club_id?: string | null;
     staff_role?: StaffRole | null;
     extra_permissions?: ExtraPermissions | null;
     is_active?: boolean;
     must_change_password?: boolean;
+    has_seen_onboarding?: boolean;
   };
   return {
-    id: data.id,
-    email: data.email,
-    first_name: data.first_name,
-    last_name: data.last_name,
-    phone: data.phone,
-    national_id: data.national_id,
-    role: data.role,
-    staff_club_id: extras.staff_club_id ?? null,
-    staff_role: extras.staff_role ?? null,
-    extra_permissions: extras.extra_permissions ?? {},
-    is_active: extras.is_active ?? true,
-    must_change_password: extras.must_change_password ?? false,
+    id: row.id,
+    email: row.email,
+    first_name: row.first_name,
+    last_name: row.last_name,
+    phone: row.phone,
+    national_id: row.national_id,
+    role: row.role,
+    staff_club_id: row.staff_club_id ?? null,
+    staff_role: row.staff_role ?? null,
+    extra_permissions: row.extra_permissions ?? {},
+    is_active: row.is_active ?? true,
+    must_change_password: row.must_change_password ?? false,
+    has_seen_onboarding: row.has_seen_onboarding ?? true,
   };
 }
 

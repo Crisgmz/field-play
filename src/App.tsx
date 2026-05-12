@@ -19,6 +19,7 @@ import AdminDashboard from "@/pages/AdminDashboard";
 import NotFound from "./pages/NotFound";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import ForceChangePassword from "@/components/ForceChangePassword";
+import OnboardingTour from "@/components/OnboardingTour";
 import logoUrl from "@/logos/logo.png";
 
 const queryClient = new QueryClient();
@@ -127,22 +128,28 @@ function AppRoutes() {
   }
 
   return (
-    <Routes>
-      <Route path="/login" element={user ? <Navigate to={authenticatedHome} replace /> : <Login />} />
-      <Route path="/register" element={user ? <Navigate to={authenticatedHome} replace /> : <Register />} />
-      {/* Recovery flow: ambas rutas son siempre públicas. /reset-password
-          maneja su propia sesión vía el hash de la URL (Supabase recovery). */}
-      <Route path="/forgot-password" element={<ForgotPassword />} />
-      <Route path="/reset-password" element={<ResetPassword />} />
-      <Route path="/" element={<ProtectedRoute><Home /></ProtectedRoute>} />
-      <Route path="/clubs/:clubId" element={<ProtectedRoute><BookingFlow /></ProtectedRoute>} />
-      <Route path="/clubs/:clubId/book" element={<ProtectedRoute><BookingFlow /></ProtectedRoute>} />
-      <Route path="/bookings" element={<ProtectedRoute><MyBookings /></ProtectedRoute>} />
-      <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
-      <Route path="/admin" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
-      <Route path="/admin/:section" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
-      <Route path="*" element={<NotFound />} />
-    </Routes>
+    <>
+      {/* Tour de onboarding del cliente — solo se autoabre cuando
+          `user.has_seen_onboarding === false`. El componente decide
+          si renderizar algo o no, así que mantener montado es barato. */}
+      <OnboardingTour />
+      <Routes>
+        <Route path="/login" element={user ? <Navigate to={authenticatedHome} replace /> : <Login />} />
+        <Route path="/register" element={user ? <Navigate to={authenticatedHome} replace /> : <Register />} />
+        {/* Recovery flow: ambas rutas son siempre públicas. /reset-password
+            maneja su propia sesión vía el hash de la URL (Supabase recovery). */}
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path="/" element={<ProtectedRoute><Home /></ProtectedRoute>} />
+        <Route path="/clubs/:clubId" element={<ProtectedRoute><BookingFlow /></ProtectedRoute>} />
+        <Route path="/clubs/:clubId/book" element={<ProtectedRoute><BookingFlow /></ProtectedRoute>} />
+        <Route path="/bookings" element={<ProtectedRoute><MyBookings /></ProtectedRoute>} />
+        <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+        <Route path="/admin" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
+        <Route path="/admin/:section" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
+        <Route path="*" element={<NotFound />} />
+      </Routes>
+    </>
   );
 }
 

@@ -92,7 +92,7 @@ export default function Home() {
 
       <section className="px-4 pt-10 pb-12 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-6xl">
-          <div className="mb-4 flex flex-wrap items-center gap-2">
+          <div className="mb-4 flex flex-wrap items-center gap-2" data-tour="sport-filter">
             <button
               type="button"
               onClick={() => setSportFilter('all')}
@@ -152,7 +152,7 @@ export default function Home() {
               </p>
             </div>
           ) : (
-            <div className="grid animate-fade-in gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid animate-fade-in gap-5 sm:grid-cols-2 lg:grid-cols-3" data-tour="club-grid">
               {filtered.map((club) => (
                 <ClubCard
                   key={club.id}

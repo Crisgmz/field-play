@@ -347,18 +347,6 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const reload = async () => {
     setLoading(true);
 
-    // Sweep en cada reload: cancela automáticamente las reservas
-    // pendientes cuyo horario ya pasó. Idempotente y barato — si no
-    // hay nada vencido, devuelve 0. Lo corremos ANTES del fetch para
-    // que la siguiente query traiga los datos ya consolidados.
-    try {
-      await supabase.rpc('rpc_cancel_expired_pending_bookings');
-    } catch (err) {
-      // No bloqueamos el reload si el sweep falla (ej. RPC todavía no
-      // desplegado en este entorno) — los datos se cargan igual.
-      console.warn('No se pudo correr el sweep de pendientes vencidas', err);
-    }
-
     const [profilesRes, clubsRes, pricingRes, fieldsRes, unitsRes, bookingsRes, blocksRes, blockUnitsRes, venueConfigsRes, clubImagesRes] = await Promise.all([
       supabase.from('profiles').select('id, email, first_name, last_name, phone, national_id, role, staff_club_id, staff_role, extra_permissions, is_active'),
       supabase.from('clubs').select('*').order('created_at', { ascending: false }),
@@ -553,25 +541,6 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
 
     reload();
-  }, [user?.id]);
-
-  // ── PERIODIC EXPIRY SWEEP ─────────────────────────────────
-  // Corremos el sweep de pendientes vencidas cada 5 minutos. Si
-  // alguna fila se actualiza, realtime dispara el reload automático
-  // (no necesitamos hacerlo a mano aquí). Si no hay vencidas, es
-  // un no-op barato.
-  useEffect(() => {
-    if (!user) return;
-    const id = window.setInterval(() => {
-      void (async () => {
-        try {
-          await supabase.rpc('rpc_cancel_expired_pending_bookings');
-        } catch {
-          // Silencioso: el reload original ya loguea si la RPC falta.
-        }
-      })();
-    }, 5 * 60 * 1000);
-    return () => window.clearInterval(id);
   }, [user?.id]);
 
   // ── PERIODIC POLLING FOR NEW BOOKINGS ─────────────────────

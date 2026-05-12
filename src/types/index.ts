@@ -30,6 +30,7 @@ export interface User {
   extra_permissions?: ExtraPermissions;
   is_active?: boolean;
   must_change_password?: boolean;
+  has_seen_onboarding?: boolean;
 }
 
 export interface LoginInput {
