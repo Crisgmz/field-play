@@ -328,31 +328,24 @@ export default function AdminDailyCalendar({
                 {/* Última fila como visual filler */}
                 <div className="border-b border-border/40" style={{ height: SLOT_HEIGHT }} />
 
-                {/* Overlay de horas pasadas: bloque rayado gris oscuro
-                    cubriendo todos los slots vencidos. No clickeable.
-                    Se actualiza cada minuto vía el setInterval del estado
-                    `now` arriba. */}
+                {/* Overlay de horas pasadas: visual-only. Usamos
+                    `pointer-events-none` para que las reservas que cayeron
+                    dentro del pasado sigan siendo clickeables — el admin
+                    puede abrir su detalle y cancelar/confirmar. */}
                 {pastUntilIdx >= 0 && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <div
-                        className="pointer-events-auto absolute left-0 right-0 top-0 cursor-not-allowed border-b border-zinc-400/50 bg-zinc-300/40"
-                        style={{
-                          height: (pastUntilIdx + 1) * SLOT_HEIGHT,
-                          backgroundImage:
-                            'repeating-linear-gradient(-45deg, rgba(0,0,0,0) 0 5px, rgba(63,63,70,0.18) 5px 10px)',
-                        }}
-                        aria-label="Hora pasada — no disponible"
-                      >
-                        <div className="sticky top-1 mx-2 inline-flex items-center gap-1 rounded-full bg-zinc-700/85 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white shadow-sm">
-                          Hora pasada
-                        </div>
-                      </div>
-                    </TooltipTrigger>
-                    <TooltipContent side="right" className="max-w-xs">
-                      <p className="text-xs">Estas horas ya transcurrieron y no pueden reservarse.</p>
-                    </TooltipContent>
-                  </Tooltip>
+                  <div
+                    className="pointer-events-none absolute left-0 right-0 top-0 border-b border-zinc-400/50 bg-zinc-300/40"
+                    style={{
+                      height: (pastUntilIdx + 1) * SLOT_HEIGHT,
+                      backgroundImage:
+                        'repeating-linear-gradient(-45deg, rgba(0,0,0,0) 0 5px, rgba(63,63,70,0.18) 5px 10px)',
+                    }}
+                    aria-label="Hora pasada"
+                  >
+                    <div className="sticky top-1 mx-2 inline-flex items-center gap-1 rounded-full bg-zinc-700/85 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white shadow-sm">
+                      Hora pasada
+                    </div>
+                  </div>
                 )}
 
                 {/* Overlay de conflictos: rayado gris claro indicando que
@@ -401,6 +394,13 @@ export default function AdminDailyCalendar({
                         <button
                           type="button"
                           onClick={() => onBookingClick(booking.id)}
+                          onPointerDownCapture={(e) => {
+                            // Evitar que Radix Tooltip haga preventDefault() en mobile
+                            // y bloquee el onClick que abre el dialog.
+                            if (e.pointerType === 'touch') {
+                              e.stopPropagation();
+                            }
+                          }}
                           className={`absolute left-1 right-1 flex flex-col overflow-hidden rounded-md px-1.5 py-1 text-left shadow-sm ring-1 ring-inset ring-black/10 transition-transform hover:z-10 hover:scale-[1.02] ${colorClass}`}
                           style={{ top, height }}
                         >

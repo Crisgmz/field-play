@@ -1132,16 +1132,33 @@ export default function AdminDashboard() {
                       <p className="text-sm text-muted-foreground">Sin reservas ni bloqueos.</p>
                     ) : (
                       <div className="space-y-1.5">
-                        {dayEvents.map((event, index) => (
-                          <div key={`${date}-${event.time}-${index}`} className="flex items-start gap-1.5 sm:gap-4 rounded-lg sm:rounded-3xl border border-border p-2 sm:p-5">
-                            <div className="min-w-[50px] sm:min-w-[84px] rounded-md sm:rounded-2xl bg-muted px-1.5 sm:px-4 py-1 sm:py-3 text-center text-[11px] sm:text-base font-semibold text-foreground shrink-0 leading-tight">
-                              {formatTime12h(event.time)}
-                            </div>
-                            <div className={`rounded-md sm:rounded-2xl px-2 sm:px-4 py-1 sm:py-3 text-[11px] sm:text-base font-medium break-words ${event.kind === 'booking' ? 'bg-primary text-primary-foreground' : 'bg-destructive text-destructive-foreground'}`}>
-                              {event.label}
-                            </div>
-                          </div>
-                        ))}
+                        {dayEvents.map((event, index) => {
+                          const isBooking = event.kind === 'booking';
+                          // Las reservas abren el detalle (ahí están las
+                          // acciones de confirmar/cancelar/rechazar). Los
+                          // bloqueos no tienen detalle por ahora —
+                          // quedan visuales.
+                          const handleClick = isBooking
+                            ? () => void openBookingDetails(event.id)
+                            : undefined;
+                          const Tag = handleClick ? 'button' : 'div';
+                          return (
+                            <Tag
+                              key={`${date}-${event.time}-${index}`}
+                              onClick={handleClick}
+                              className={`flex w-full items-start gap-1.5 sm:gap-4 rounded-lg sm:rounded-3xl border border-border p-2 sm:p-5 text-left ${
+                                handleClick ? 'cursor-pointer transition-all hover:border-primary/40 hover:bg-accent/40 active:scale-[0.98]' : ''
+                              }`}
+                            >
+                              <div className="min-w-[50px] sm:min-w-[84px] rounded-md sm:rounded-2xl bg-muted px-1.5 sm:px-4 py-1 sm:py-3 text-center text-[11px] sm:text-base font-semibold text-foreground shrink-0 leading-tight">
+                                {formatTime12h(event.time)}
+                              </div>
+                              <div className={`rounded-md sm:rounded-2xl px-2 sm:px-4 py-1 sm:py-3 text-[11px] sm:text-base font-medium break-words ${event.kind === 'booking' ? 'bg-primary text-primary-foreground' : 'bg-destructive text-destructive-foreground'}`}>
+                                {event.label}
+                              </div>
+                            </Tag>
+                          );
+                        })}
                       </div>
                     )}
                   </div>
