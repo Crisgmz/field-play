@@ -133,6 +133,10 @@ export type InviteStaffResult =
   | { ok: true; mode: 'created' | 'upgraded'; userId: string; message: string }
   | { ok: false; message: string };
 
+export type CreateWalkinClientResult =
+  | { ok: true; userId: string; message: string }
+  | { ok: false; message: string };
+
 export type UploadClubImageResult =
   | { ok: true; image: ClubImage }
   | { ok: false; reason: 'not_logged_in' | 'bucket_missing' | 'storage_denied' | 'storage_failed' | 'db_failed'; message: string };
@@ -151,6 +155,13 @@ interface InviteStaffInput {
   staff_role: 'groundskeeper' | 'receptionist' | 'accountant';
 }
 
+interface CreateWalkinClientInput {
+  first_name: string;
+  last_name?: string;
+  phone: string;
+  email?: string;
+}
+
 interface AppDataContextType {
   clubs: Club[];
   fields: Field[];
@@ -165,6 +176,7 @@ interface AppDataContextType {
   uploadClubImage: (clubId: string, file: File, caption?: string) => Promise<UploadClubImageResult>;
   deleteClubImage: (imageId: string) => Promise<boolean>;
   inviteStaff: (payload: InviteStaffInput) => Promise<InviteStaffResult>;
+  createWalkinClient: (payload: CreateWalkinClientInput) => Promise<CreateWalkinClientResult>;
   setStaffActive: (profileId: string, active: boolean) => Promise<boolean>;
   removeStaff: (profileId: string) => Promise<boolean>;
   createBooking: (payload: CreateBookingInput) => Promise<Booking | null>;
@@ -1737,6 +1749,118 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     };
   };
 
+  // Crea un cliente "walk-in" desde el panel admin. Email opcional —
+  // si no se provee, generamos un placeholder oculto para que Supabase
+  // auth acepte el signUp. Ese cliente queda en el sistema asociable
+  // a reservas pero no puede iniciar sesión (placeholder + password
+  // random). Si más adelante el cliente trae su email real, el admin
+  // lo actualiza desde su perfil.
+  //
+  // Igual que inviteStaff: guardamos los tokens del admin, hacemos
+  // signUp, y restauramos la sesión admin después.
+  const createWalkinClient = async (payload: CreateWalkinClientInput): Promise<CreateWalkinClientResult> => {
+    if (!user) return { ok: false, message: 'No hay sesión activa.' };
+    const firstName = payload.first_name.trim();
+    const phone = payload.phone.trim();
+    if (!firstName) return { ok: false, message: 'El nombre es obligatorio.' };
+    if (!phone) return { ok: false, message: 'El teléfono es obligatorio.' };
+
+    const realEmail = payload.email?.trim().toLowerCase();
+    if (realEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(realEmail)) {
+      return { ok: false, message: 'El correo no tiene un formato válido.' };
+    }
+
+    // Si el admin no provee email, generamos un placeholder único.
+    // El dominio `walkin.fieldplay.local` es ficticio — no se enviarán
+    // correos reales a esa dirección.
+    const email = realEmail
+      || `walkin-${crypto.randomUUID()}@walkin.fieldplay.local`;
+
+    // Si ya existe un profile con ese email real, devolvemos error
+    // — el admin debería buscarlo en el listado en lugar de crear duplicado.
+    if (realEmail) {
+      const { data: existing } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('email', email)
+        .maybeSingle();
+      if (existing) {
+        return { ok: false, message: 'Ya existe un cliente con ese correo. Búscalo en el listado.' };
+      }
+    }
+
+    // Guardamos sesión admin para restaurarla post-signUp.
+    const { data: sessionData } = await supabase.auth.getSession();
+    const adminSession = sessionData.session;
+    if (!adminSession) {
+      return { ok: false, message: 'Tu sesión expiró. Vuelve a iniciar sesión.' };
+    }
+
+    // Password aleatorio — el cliente walk-in no necesita loguearse.
+    // Si quiere acceso real más adelante, usará "Olvidé mi contraseña".
+    const randomPassword = `wk_${crypto.randomUUID()}`.slice(0, 24);
+
+    const { data: signUpData, error: signUpErr } = await supabase.auth.signUp({
+      email,
+      password: randomPassword,
+      options: {
+        data: {
+          first_name: firstName,
+          last_name: payload.last_name?.trim() ?? '',
+          phone,
+          role: 'client',
+        },
+      },
+    });
+
+    // Restaurar sesión admin SIEMPRE — pase lo que pase.
+    try {
+      await supabase.auth.setSession({
+        access_token: adminSession.access_token,
+        refresh_token: adminSession.refresh_token,
+      });
+    } catch (restoreErr) {
+      console.error('No se pudo restaurar la sesión admin:', restoreErr);
+    }
+
+    if (signUpErr) {
+      console.error('Error en signUp del walk-in client:', signUpErr);
+      return { ok: false, message: `No se pudo crear el cliente: ${signUpErr.message}` };
+    }
+
+    const newUserId = signUpData.user?.id;
+    if (!newUserId) {
+      return { ok: false, message: 'El cliente fue creado pero no se obtuvo su ID. Recarga e inténtalo de nuevo.' };
+    }
+
+    // Aseguramos campos clave en el profile aunque el trigger los
+    // grabe — defensa por si el trigger viejo está corriendo.
+    const { error: profileFixErr } = await supabase
+      .from('profiles')
+      .update({
+        first_name: firstName,
+        last_name: payload.last_name?.trim() ?? '',
+        phone,
+        role: 'client',
+        // Marcamos como visto el onboarding para que un cliente creado
+        // por admin no vea el tour si llega a loguearse.
+        has_seen_onboarding: true,
+      })
+      .eq('id', newUserId);
+    if (profileFixErr) {
+      console.warn('No se pudo asegurar campos del profile cliente:', profileFixErr.message);
+    }
+
+    await reload();
+    return {
+      ok: true,
+      userId: newUserId,
+      message: realEmail
+        ? 'Cliente creado correctamente.'
+        : 'Cliente creado (sin correo). Si más adelante consigues su email, actualízalo desde su perfil.',
+    };
+  };
+
   const setStaffActive = async (profileId: string, active: boolean): Promise<boolean> => {
     const { error } = await supabase.from('profiles').update({ is_active: active }).eq('id', profileId);
     if (error) {
@@ -2030,6 +2154,7 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     uploadClubImage,
     deleteClubImage,
     inviteStaff,
+    createWalkinClient,
     setStaffActive,
     removeStaff,
     createBooking,

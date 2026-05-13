@@ -67,8 +67,12 @@ const todayIso = () => new Date().toISOString().split('T')[0];
 
 export default function AdminCreateBookingDialog({ open, onOpenChange, initialValues }: Props) {
   const { user, isStaff, staffClubId } = useAuth();
-  const { clubs, fields, profiles, pricingRules, bookings, blocks, createBooking } = useAppData();
+  const { clubs, fields, profiles, pricingRules, bookings, blocks, createBooking, createWalkinClient } = useAppData();
   const [submitting, setSubmitting] = useState(false);
+  // Estado del mini-form "crear cliente nuevo" dentro del dialog.
+  const [showNewClient, setShowNewClient] = useState(false);
+  const [newClientBusy, setNewClientBusy] = useState(false);
+  const [newClient, setNewClient] = useState({ first_name: '', last_name: '', phone: '', email: '' });
 
   useDialogBackButton(open, () => onOpenChange(false));
 
@@ -197,6 +201,44 @@ export default function AdminCreateBookingDialog({ open, onOpenChange, initialVa
   }, [clientProfiles, form.client_query]);
 
   const selectedClient = clientProfiles.find((c) => c.id === form.client_id) ?? null;
+
+  // Crea el cliente walk-in y lo deja auto-seleccionado en el form
+  // para que el admin solo confirme la reserva al final.
+  const handleCreateClient = async () => {
+    if (newClientBusy) return;
+    if (!newClient.first_name.trim()) {
+      toast.error('Ingresa el nombre del cliente.');
+      return;
+    }
+    if (!newClient.phone.trim()) {
+      toast.error('Ingresa el teléfono del cliente.');
+      return;
+    }
+    setNewClientBusy(true);
+    try {
+      const result = await createWalkinClient({
+        first_name: newClient.first_name,
+        last_name: newClient.last_name,
+        phone: newClient.phone,
+        email: newClient.email.trim() || undefined,
+      });
+      if (!result.ok) {
+        toast.error(result.message);
+        return;
+      }
+      toast.success(result.message);
+      // Auto-selecciona al recién creado y cierra el mini-form.
+      setForm((prev) => ({
+        ...prev,
+        client_id: result.userId,
+        client_query: `${newClient.first_name} ${newClient.last_name}`.trim(),
+      }));
+      setShowNewClient(false);
+      setNewClient({ first_name: '', last_name: '', phone: '', email: '' });
+    } finally {
+      setNewClientBusy(false);
+    }
+  };
 
   const resetForm = () => {
     setForm({
@@ -345,6 +387,71 @@ export default function AdminCreateBookingDialog({ open, onOpenChange, initialVa
               <p className="text-xs text-muted-foreground">
                 Cliente: <span className="font-medium text-foreground">{selectedClient.first_name} {selectedClient.last_name}</span> · {selectedClient.email}
               </p>
+            )}
+
+            {/* Atajo para crear un cliente nuevo sin salir del dialog
+                de reserva. Útil para walk-ins. */}
+            {!showNewClient ? (
+              <button
+                type="button"
+                onClick={() => setShowNewClient(true)}
+                className="text-xs font-medium text-primary hover:underline"
+              >
+                + Crear cliente nuevo
+              </button>
+            ) : (
+              <div className="space-y-2 rounded-xl border border-primary/30 bg-primary/5 p-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-primary">Nuevo cliente</p>
+                  <button
+                    type="button"
+                    onClick={() => { setShowNewClient(false); setNewClient({ first_name: '', last_name: '', phone: '', email: '' }); }}
+                    className="text-[11px] text-muted-foreground hover:text-foreground"
+                    disabled={newClientBusy}
+                  >
+                    Cancelar
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <Input
+                    placeholder="Nombre *"
+                    value={newClient.first_name}
+                    onChange={(e) => setNewClient((p) => ({ ...p, first_name: e.target.value }))}
+                    disabled={newClientBusy}
+                  />
+                  <Input
+                    placeholder="Apellido"
+                    value={newClient.last_name}
+                    onChange={(e) => setNewClient((p) => ({ ...p, last_name: e.target.value }))}
+                    disabled={newClientBusy}
+                  />
+                </div>
+                <Input
+                  placeholder="Teléfono *"
+                  value={newClient.phone}
+                  onChange={(e) => setNewClient((p) => ({ ...p, phone: e.target.value }))}
+                  disabled={newClientBusy}
+                />
+                <Input
+                  type="email"
+                  placeholder="Email (opcional)"
+                  value={newClient.email}
+                  onChange={(e) => setNewClient((p) => ({ ...p, email: e.target.value }))}
+                  disabled={newClientBusy}
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  Si no tienes el correo, déjalo vacío. El cliente quedará registrado y puedes actualizar el correo después.
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="w-full"
+                  onClick={() => void handleCreateClient()}
+                  disabled={newClientBusy}
+                >
+                  {newClientBusy ? (<><Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />Creando...</>) : 'Crear cliente'}
+                </Button>
+              </div>
             )}
           </div>
 
