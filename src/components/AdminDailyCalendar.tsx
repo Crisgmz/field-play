@@ -33,8 +33,11 @@ interface Props {
 }
 
 const SLOT_HEIGHT = 32;
-const TIME_LABEL_WIDTH = 64;
-const COL_MIN_WIDTH = 120;
+// Antes 64 / 120 → el calendario completo no cabía en 1280px de viewport
+// (10 unidades versátiles × 120 + label = 1264px). Reducimos para que
+// quepa al 100% de zoom en laptops estándar.
+const TIME_LABEL_WIDTH = 56;
+const COL_MIN_WIDTH = 96;
 
 const STATUS_COLORS: Record<Booking['status'], string> = {
   confirmed: 'bg-emerald-500 hover:bg-emerald-600 text-white',

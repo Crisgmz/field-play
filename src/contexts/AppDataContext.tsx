@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { PHYSICAL_SLOTS } from '@/data/mockData';
-import { supabase } from '@/lib/supabase';
+import { supabase, supabaseSignupClient } from '@/lib/supabase';
 import {
   sendAdminBookingAlert,
   sendBookingCancelledEmail,
@@ -1615,13 +1615,14 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
   // Flujo:
   //   1. Si ya existe un profile con ese email → UPDATE para hacerlo
   //      staff de este club (caso "upgrade" de cliente existente).
-  //   2. Si NO existe → `supabase.auth.signUp()` con metadata que
-  //      incluye role, staff_club_id, staff_role. El trigger
-  //      `handle_new_user` (migración 019) inserta el profile con
-  //      todo lo necesario.
-  //   3. Como signUp reemplaza la sesión actual con la del nuevo
-  //      usuario, guardamos los tokens del admin antes y los
-  //      restauramos con setSession() después.
+  //   2. Si NO existe → `signUp()` en `supabaseSignupClient` con
+  //      metadata que incluye role, staff_club_id, staff_role. El
+  //      trigger `handle_new_user` (migración 020) inserta el
+  //      profile con todo lo necesario.
+  //   3. Como `supabaseSignupClient` es un cliente aislado
+  //      (`persistSession: false`, storageKey distinto), la sesión
+  //      del cliente principal `supabase` NO cambia. No hace falta
+  //      restaurar nada y la UI del admin nunca flashea.
   const inviteStaff = async (payload: InviteStaffInput): Promise<InviteStaffResult> => {
     if (!user) return { ok: false, message: 'No hay sesión activa.' };
 
@@ -1675,14 +1676,11 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       };
     }
 
-    // 2) Caso CREATE — guardar sesión admin, signUp, restaurar sesión.
-    const { data: sessionData } = await supabase.auth.getSession();
-    const adminSession = sessionData.session;
-    if (!adminSession) {
-      return { ok: false, message: 'Tu sesión expiró. Vuelve a iniciar sesión.' };
-    }
-
-    const { data: signUpData, error: signUpErr } = await supabase.auth.signUp({
+    // 2) Caso CREATE — usamos un cliente Supabase aislado para el
+    // signUp. Eso evita que el cliente principal `supabase` reciba
+    // el evento SIGNED_IN del nuevo usuario, que hacía flashear la
+    // sesión del admin a la del empleado y volver.
+    const { data: signUpData, error: signUpErr } = await supabaseSignupClient.auth.signUp({
       email,
       password: payload.password,
       options: {
@@ -1701,16 +1699,9 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       },
     });
 
-    // Restauramos la sesión admin SIEMPRE — pase lo que pase con
-    // signUp — para que el usuario actual siga siendo el admin.
-    try {
-      await supabase.auth.setSession({
-        access_token: adminSession.access_token,
-        refresh_token: adminSession.refresh_token,
-      });
-    } catch (restoreErr) {
-      console.error('No se pudo restaurar la sesión admin:', restoreErr);
-    }
+    // No hace falta restaurar sesión admin — el cliente principal
+    // nunca cambió de usuario. El signUp ocurrió en un cliente
+    // aislado con storageKey distinto y persistSession=false.
 
     if (signUpErr) {
       console.error('Error en signUp del empleado:', signUpErr);
@@ -1792,18 +1783,14 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
     }
 
-    // Guardamos sesión admin para restaurarla post-signUp.
-    const { data: sessionData } = await supabase.auth.getSession();
-    const adminSession = sessionData.session;
-    if (!adminSession) {
-      return { ok: false, message: 'Tu sesión expiró. Vuelve a iniciar sesión.' };
-    }
-
     // Password aleatorio — el cliente walk-in no necesita loguearse.
     // Si quiere acceso real más adelante, usará "Olvidé mi contraseña".
     const randomPassword = `wk_${crypto.randomUUID()}`.slice(0, 24);
 
-    const { data: signUpData, error: signUpErr } = await supabase.auth.signUp({
+    // Cliente Supabase aislado — el signUp NO afecta la sesión del
+    // admin en el cliente principal. Evita el "flash" del perfil
+    // recién creado en la UI.
+    const { data: signUpData, error: signUpErr } = await supabaseSignupClient.auth.signUp({
       email,
       password: randomPassword,
       options: {
@@ -1815,16 +1802,6 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
         },
       },
     });
-
-    // Restaurar sesión admin SIEMPRE — pase lo que pase.
-    try {
-      await supabase.auth.setSession({
-        access_token: adminSession.access_token,
-        refresh_token: adminSession.refresh_token,
-      });
-    } catch (restoreErr) {
-      console.error('No se pudo restaurar la sesión admin:', restoreErr);
-    }
 
     if (signUpErr) {
       console.error('Error en signUp del walk-in client:', signUpErr);
