@@ -254,10 +254,11 @@ function buildFieldUnits(fieldId: string, layout: CreateFieldInput['layout']): F
   }
 
   if (layout === 'three_7') {
+    // F7 horizontales: F7_1 abajo, F7_3 arriba.
     return [
-      createUnit(fieldId, 'F7', 'F7_1', ['S1', 'S4']),
-      createUnit(fieldId, 'F7', 'F7_2', ['S2', 'S5']),
-      createUnit(fieldId, 'F7', 'F7_3', ['S3', 'S6']),
+      createUnit(fieldId, 'F7', 'F7_1', ['S1', 'S2']),
+      createUnit(fieldId, 'F7', 'F7_2', ['S3', 'S4']),
+      createUnit(fieldId, 'F7', 'F7_3', ['S5', 'S6']),
     ];
   }
 
@@ -265,11 +266,13 @@ function buildFieldUnits(fieldId: string, layout: CreateFieldInput['layout']): F
     return PHYSICAL_SLOTS.map((slotId, index) => createUnit(fieldId, 'F5', `C${index + 1}`, [slotId]));
   }
 
+  // versatile_full — F11 + 3 filas horizontales de F7 + 6 F5.
+  // F7_1 abajo (C1+C2), F7_2 medio (C3+C4), F7_3 arriba (C5+C6).
   return [
     createUnit(fieldId, 'F11', 'F11', ['S1', 'S2', 'S3', 'S4', 'S5', 'S6']),
-    createUnit(fieldId, 'F7', 'F7_1', ['S1', 'S4']),
-    createUnit(fieldId, 'F7', 'F7_2', ['S2', 'S5']),
-    createUnit(fieldId, 'F7', 'F7_3', ['S3', 'S6']),
+    createUnit(fieldId, 'F7', 'F7_1', ['S1', 'S2']),
+    createUnit(fieldId, 'F7', 'F7_2', ['S3', 'S4']),
+    createUnit(fieldId, 'F7', 'F7_3', ['S5', 'S6']),
     createUnit(fieldId, 'F5', 'C1', ['S1']),
     createUnit(fieldId, 'F5', 'C2', ['S2']),
     createUnit(fieldId, 'F5', 'C3', ['S3']),

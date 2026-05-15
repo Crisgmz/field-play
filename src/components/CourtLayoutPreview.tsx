@@ -44,7 +44,12 @@ const TYPE_COLORS: Record<FieldType, { bg: string; border: string; text: string;
   PADEL: { bg: 'bg-sky-100', border: 'border-sky-500', text: 'text-sky-700', ring: 'ring-sky-500' },
 };
 
-const SLOT_IDS: PhysicalSlotId[] = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6'];
+// Orden de renderizado para el grid 3×2 vertical. Queremos:
+//     S1  S2   ← F7_1 (arriba)
+//     S3  S4   ← F7_2 (medio)
+//     S5  S6   ← F7_3 (abajo)
+// Slot 1 y 2 quedan arriba, igual que en el dibujo del cliente.
+const DISPLAY_SLOT_ORDER: PhysicalSlotId[] = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6'];
 
 const GROUP_COLORS = [
   'ring-violet-400 bg-violet-50',
@@ -114,15 +119,16 @@ export default function CourtLayoutPreview({ layout, units: fieldUnits, highligh
         </div>
       )}
 
-      {/* Court visual — 3×2 grid representing the physical field */}
+      {/* Court visual — 3 filas × 2 cols, vertical. La línea blanca
+          horizontal marca la mitad del campo, el círculo centra. */}
       <div className="relative overflow-hidden rounded-2xl border-2 border-emerald-300 bg-emerald-700/10 p-1">
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-          <div className="h-[60%] w-px bg-white/20" />
+          <div className="h-px w-[60%] bg-white/20" />
         </div>
         <div className="pointer-events-none absolute left-1/2 top-1/2 h-12 w-12 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/20" />
 
-        <div className={`grid grid-cols-3 ${compact ? 'gap-1' : 'gap-1.5'}`}>
-          {SLOT_IDS.map((slotId) => {
+        <div className={`grid grid-cols-2 ${compact ? 'gap-1' : 'gap-1.5'}`}>
+          {DISPLAY_SLOT_ORDER.map((slotId) => {
             const isHighlighted = highlightedSlots.has(slotId);
             const group = grouping.get(slotId);
             const groupColor = group !== undefined ? GROUP_COLORS[group % GROUP_COLORS.length] : '';

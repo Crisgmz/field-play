@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import FieldModeSelector from '@/components/FieldModeSelector';
 import TimeSlotPicker from '@/components/TimeSlotPicker';
 import ClubGallery from '@/components/ClubGallery';
+import CourtLayoutPreview from '@/components/CourtLayoutPreview';
 import { enforceClientTimeRestriction, findAvailableUnit, getAvailableTimeSlotsV2, getUnitOptions, getUnitsByType } from '@/lib/availability';
 import { formatTime12h } from '@/lib/bookingFormat';
 import { useAppData } from '@/contexts/AppDataContext';
@@ -283,7 +284,7 @@ export default function BookingFlow() {
   const uploadPaymentProof = async () => {
     if (!paymentProofFile || !user) return null;
     const ext = paymentProofFile.name.split('.').pop()?.toLowerCase() ?? 'bin';
-    const safeDate = selectedDate.replaceAll('-', '');
+    const safeDate = selectedDate.replace(/-/g, '');
     const filePath = `${user.id}/${safeDate}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
     const { error } = await supabase.storage
       .from('booking-proofs')
@@ -484,6 +485,24 @@ export default function BookingFlow() {
 
           {step === 'configure' && (
             <>
+              {/* Preview visual del campo arriba del flujo — solo para
+                  fútbol. Aparece desde el primer momento (sin requerir
+                  modalidad seleccionada) y va resaltando los slots
+                  conforme el cliente avanza en el flujo. Pádel no
+                  aplica porque no tiene slot_ids. */}
+              {activeSport === 'soccer' && field && (
+                <section className="rounded-2xl border border-border bg-card p-3 shadow-sm">
+                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Cómo está la cancha
+                  </p>
+                  <CourtLayoutPreview
+                    units={field.units}
+                    highlightType={selectedMode}
+                    compact
+                  />
+                </section>
+              )}
+
               {/* Switcher de deporte cuando el club ofrece ambos. Si solo
                   ofrece uno, no tiene sentido mostrar el switcher. */}
               {clubHasSoccer && clubHasPadel && (
@@ -637,6 +656,7 @@ export default function BookingFlow() {
                       Te seleccionamos una automáticamente. Si prefieres otra, elige la que quieras de las disponibles.
                     </p>
                   </header>
+
                   <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                     {unitOptions.map((option) => {
                       const isAuto = autoUnit?.id === option.id && !manualUnitId;

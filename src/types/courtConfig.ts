@@ -34,12 +34,13 @@ export const COURT_TEMPLATES: CourtTemplate[] = [
   {
     id: 'three_7',
     name: '3x Fútbol 7',
-    description: '3 canchas de fútbol 7 (pares de slots)',
+    description: '3 canchas de fútbol 7 (filas horizontales)',
     sport: 'soccer',
     units: [
-      { type: 'F7', name: 'F7_1', slotIds: ['S1', 'S4'], parentIndex: null },
-      { type: 'F7', name: 'F7_2', slotIds: ['S2', 'S5'], parentIndex: null },
-      { type: 'F7', name: 'F7_3', slotIds: ['S3', 'S6'], parentIndex: null },
+      // Filas horizontales: F7_1 abajo, F7_3 arriba (vista vertical).
+      { type: 'F7', name: 'F7_1', slotIds: ['S1', 'S2'], parentIndex: null },
+      { type: 'F7', name: 'F7_2', slotIds: ['S3', 'S4'], parentIndex: null },
+      { type: 'F7', name: 'F7_3', slotIds: ['S5', 'S6'], parentIndex: null },
     ],
   },
   {
@@ -64,19 +65,20 @@ export const COURT_TEMPLATES: CourtTemplate[] = [
     units: [
       // F11 (index 0)
       { type: 'F11', name: 'F11', slotIds: ['S1', 'S2', 'S3', 'S4', 'S5', 'S6'], parentIndex: null },
-      // F7 (indices 1-3)
-      { type: 'F7', name: 'F7_1', slotIds: ['S1', 'S4'], parentIndex: 0 },
-      { type: 'F7', name: 'F7_2', slotIds: ['S2', 'S5'], parentIndex: 0 },
-      { type: 'F7', name: 'F7_3', slotIds: ['S3', 'S6'], parentIndex: 0 },
-      // F5 (indices 4-9): each S_n is the F5 child of the F7 column it belongs to.
-      //   S1, S4 → F7_1 (parentIndex 1)
-      //   S2, S5 → F7_2 (parentIndex 2)
-      //   S3, S6 → F7_3 (parentIndex 3)
+      // F7 (indices 1-3) — filas horizontales del campo.
+      // Visualmente: F7_1 abajo, F7_3 arriba.
+      { type: 'F7', name: 'F7_1', slotIds: ['S1', 'S2'], parentIndex: 0 },
+      { type: 'F7', name: 'F7_2', slotIds: ['S3', 'S4'], parentIndex: 0 },
+      { type: 'F7', name: 'F7_3', slotIds: ['S5', 'S6'], parentIndex: 0 },
+      // F5 (indices 4-9): cada slot es hijo de su F7 (misma fila).
+      //   C1, C2 → F7_1 (parentIndex 1)
+      //   C3, C4 → F7_2 (parentIndex 2)
+      //   C5, C6 → F7_3 (parentIndex 3)
       { type: 'F5', name: 'C1', slotIds: ['S1'], parentIndex: 1 },
-      { type: 'F5', name: 'C2', slotIds: ['S2'], parentIndex: 2 },
-      { type: 'F5', name: 'C3', slotIds: ['S3'], parentIndex: 3 },
-      { type: 'F5', name: 'C4', slotIds: ['S4'], parentIndex: 1 },
-      { type: 'F5', name: 'C5', slotIds: ['S5'], parentIndex: 2 },
+      { type: 'F5', name: 'C2', slotIds: ['S2'], parentIndex: 1 },
+      { type: 'F5', name: 'C3', slotIds: ['S3'], parentIndex: 2 },
+      { type: 'F5', name: 'C4', slotIds: ['S4'], parentIndex: 2 },
+      { type: 'F5', name: 'C5', slotIds: ['S5'], parentIndex: 3 },
       { type: 'F5', name: 'C6', slotIds: ['S6'], parentIndex: 3 },
     ],
   },

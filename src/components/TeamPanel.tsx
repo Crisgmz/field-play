@@ -89,7 +89,7 @@ const PERMISSION_KEYS: PermissionKey[] = [
 
 export default function TeamPanel() {
   const { user } = useAuth();
-  const { clubs, profiles, inviteStaff, setStaffActive, removeStaff } = useAppData();
+  const { clubs, profiles, inviteStaff, setStaffActive, removeStaff, reload } = useAppData();
 
   // El admin propietario (`role=club_admin`) ve sus clubes. El staff
   // con sub-rol 'admin' tiene permisos de admin sobre el club al que
@@ -204,11 +204,16 @@ export default function TeamPanel() {
       p_permission: key,
       p_granted: granted,
     });
-    setPermissionBusyKey(null);
     if (error) {
+      setPermissionBusyKey(null);
       toast.error(error.message);
       return;
     }
+    // Re-cargamos para que el state local de profiles refleje el
+    // nuevo extra_permissions. Sin esto el toggle seguía mostrando
+    // el valor viejo hasta el próximo reload.
+    await reload();
+    setPermissionBusyKey(null);
     toast.success(granted ? 'Permiso otorgado.' : 'Permiso revocado.');
   };
 
@@ -218,11 +223,13 @@ export default function TeamPanel() {
       p_profile_id: member.id,
       p_permission: key,
     });
-    setPermissionBusyKey(null);
     if (error) {
+      setPermissionBusyKey(null);
       toast.error(error.message);
       return;
     }
+    await reload();
+    setPermissionBusyKey(null);
     toast.success('Permiso restaurado al default del rol.');
   };
 
