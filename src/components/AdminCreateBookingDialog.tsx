@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { CalendarPlus, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -145,17 +145,29 @@ export default function AdminCreateBookingDialog({ open, onOpenChange, initialVa
   const selectedField = clubFields.find((f) => f.id === form.field_id) ?? null;
   const availableModes = useMemo<FieldType[]>(() => {
     if (!selectedField) return [];
-    return (['F11', 'F7', 'F5'] as FieldType[]).filter(
+    return (['F11', 'F7', 'F5', 'PADEL'] as FieldType[]).filter(
       (type) => getUnitsByType(selectedField, type).length > 0,
     );
   }, [selectedField]);
 
+  // Pádel no se subdivide: la cancha ES la modalidad. Si la única
+  // modalidad disponible es PADEL, se autoselecciona y se oculta el
+  // dropdown — el admin no tiene que elegir nada.
+  const isPadelField = availableModes.length === 1 && availableModes[0] === 'PADEL';
+
   // Si la modalidad seleccionada deja de ser válida (cambio de field), limpiar.
+  // Para canchas de pádel, autoseleccionamos PADEL directamente.
   useEffect(() => {
+    if (isPadelField) {
+      if (form.mode !== 'PADEL') {
+        setForm((prev) => ({ ...prev, mode: 'PADEL' }));
+      }
+      return;
+    }
     if (form.mode && !availableModes.includes(form.mode as FieldType)) {
       setForm((prev) => ({ ...prev, mode: '' }));
     }
-  }, [availableModes, form.mode]);
+  }, [availableModes, form.mode, isPadelField]);
 
   // Auto-cálculo del precio en base a pricingRules (editable).
   const pricingRule = pricingRules.find(
@@ -173,13 +185,23 @@ export default function AdminCreateBookingDialog({ open, onOpenChange, initialVa
     return Math.round((pricingRule.price_per_hour / 60) * minutesSelected);
   }, [pricingRule, minutesSelected]);
 
-  // Cuando cambian los inputs que afectan el precio, autocompletamos
-  // (sin pisar si el admin lo editó manualmente y todavía no se vacía).
+  // Cuando cambian los inputs que afectan el precio, autocompletamos.
+  // Trackeamos el último precio auto-asignado para distinguir edición
+  // manual del admin vs valor sugerido: si el campo coincide con el
+  // último auto-precio, sigue siendo "automático" y se actualiza
+  // cuando cambia la duración (p.ej. 1h → 1:30h debe pasar de 3000 a 4500).
+  const lastAutoPriceRef = useRef<string>('');
   useEffect(() => {
     if (computedPrice > 0) {
       setForm((prev) => {
-        if (prev.total_price === '' || prev.total_price === '0') {
-          return { ...prev, total_price: String(computedPrice) };
+        const isUntouched =
+          prev.total_price === '' ||
+          prev.total_price === '0' ||
+          prev.total_price === lastAutoPriceRef.current;
+        if (isUntouched) {
+          const next = String(computedPrice);
+          lastAutoPriceRef.current = next;
+          return { ...prev, total_price: next };
         }
         return prev;
       });
@@ -474,29 +496,34 @@ export default function AdminCreateBookingDialog({ open, onOpenChange, initialVa
                 <SelectTrigger><SelectValue placeholder="Selecciona..." /></SelectTrigger>
                 <SelectContent>
                   {clubFields.map((f) => (
-                    <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+                    <SelectItem key={f.id} value={f.id}>
+                      {f.name} · {f.sport === 'padel' ? 'Pádel' : 'Fútbol'}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
           </div>
 
-          {/* Modalidad + Fecha */}
+          {/* Modalidad + Fecha. En pádel, la cancha no se subdivide
+              y la modalidad se omite (queda fijada en PADEL). */}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div>
-              <label className="mb-1 block text-sm font-medium">Modalidad</label>
-              <Select value={form.mode} onValueChange={(value) => setForm((p) => ({ ...p, mode: value as FieldType }))}>
-                <SelectTrigger><SelectValue placeholder="Selecciona..." /></SelectTrigger>
-                <SelectContent>
-                  {availableModes.map((m) => (
-                    <SelectItem key={m} value={m}>{m}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {availableModes.length === 0 && form.field_id && (
-                <p className="mt-1 text-xs text-amber-700">Esta cancha no tiene modalidades configuradas.</p>
-              )}
-            </div>
+            {!isPadelField && (
+              <div>
+                <label className="mb-1 block text-sm font-medium">Modalidad</label>
+                <Select value={form.mode} onValueChange={(value) => setForm((p) => ({ ...p, mode: value as FieldType }))}>
+                  <SelectTrigger><SelectValue placeholder="Selecciona..." /></SelectTrigger>
+                  <SelectContent>
+                    {availableModes.map((m) => (
+                      <SelectItem key={m} value={m}>{m}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {availableModes.length === 0 && form.field_id && (
+                  <p className="mt-1 text-xs text-amber-700">Esta cancha no tiene modalidades configuradas.</p>
+                )}
+              </div>
+            )}
             <div>
               <label className="mb-1 block text-sm font-medium">Fecha</label>
               <Input
