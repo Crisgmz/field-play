@@ -8,12 +8,12 @@ import FieldModeSelector from '@/components/FieldModeSelector';
 import TimeSlotPicker from '@/components/TimeSlotPicker';
 import ClubGallery from '@/components/ClubGallery';
 import CourtLayoutPreview from '@/components/CourtLayoutPreview';
-import { enforceClientTimeRestriction, findAvailableUnit, getAvailableTimeSlotsV2, getUnitOptions, getUnitsByType } from '@/lib/availability';
+import { enforceClientTimeRestriction, getAvailableTimeSlotsV2, getUnitOptions, getUnitsByType } from '@/lib/availability';
 import { formatTime12h } from '@/lib/bookingFormat';
 import { useAppData } from '@/contexts/AppDataContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
-import { Field, FieldType, Sport, TimeSlot } from '@/types';
+import { Field, FieldType, Sport, TimeSlot, UnitOption } from '@/types';
 
 const BANK_ACCOUNT = {
   bank: 'Banco Popular',
@@ -113,6 +113,7 @@ export default function BookingFlow() {
   const [selectedHours, setSelectedHours] = useState<string[]>([]);
   const [showAllDates, setShowAllDates] = useState(false);
   const [serverTimeline, setServerTimeline] = useState<TimeSlot[] | null>(null);
+  const [serverUnitOptions, setServerUnitOptions] = useState<UnitOption[] | null>(null);
   const [serverPrice, setServerPrice] = useState<number | null>(null);
   const [paymentProofFile, setPaymentProofFile] = useState<File | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('bank_transfer');
@@ -139,17 +140,27 @@ export default function BookingFlow() {
   const selectedMinutes = sortedHours.length * slotDurationMinutes;
   const maxSelectableSlots = Math.max(1, Math.floor(240 / slotDurationMinutes));
 
-  const autoUnit = useMemo(() => {
-    if (!selectedMode || !startTime || !endTime || !field) return null;
-    return findAvailableUnit(selectedDate, startTime, endTime, selectedMode, field, bookings, blocks);
-  }, [selectedMode, selectedDate, startTime, endTime, field, bookings, blocks]);
-
   // Lista completa de unidades del tipo (con su disponibilidad). El cliente
   // puede elegir manualmente una específica si no le sirve la auto-seleccionada.
+  //
+  // Preferimos `serverUnitOptions` (RPC `rpc_get_unit_options`, security
+  // definer) porque ve TODAS las reservas. El array `bookings` del contexto
+  // está limitado por RLS a las reservas propias del cliente, así que el
+  // cálculo client-side mostraría como "disponibles" canchas ya ocupadas por
+  // otros clientes → overlap. El client-side queda solo como fallback
+  // (pádel / RPC no desplegada).
   const unitOptions = useMemo(() => {
     if (!selectedMode || !startTime || !endTime || !field) return [];
+    if (serverUnitOptions) return serverUnitOptions;
     return getUnitOptions(selectedDate, startTime, endTime, selectedMode, field, bookings, blocks);
-  }, [selectedMode, selectedDate, startTime, endTime, field, bookings, blocks]);
+  }, [serverUnitOptions, selectedMode, selectedDate, startTime, endTime, field, bookings, blocks]);
+
+  // Unidad auto-seleccionada: la primera disponible de la lista efectiva
+  // (misma fuente que las cards, así nunca auto-elegimos una ocupada).
+  const autoUnit = useMemo(
+    () => unitOptions.find((option) => option.available) ?? null,
+    [unitOptions],
+  );
 
   // Unidad efectiva: la manual si existe y sigue disponible, si no la auto.
   const selectedUnit = useMemo(() => {
@@ -219,6 +230,31 @@ export default function BookingFlow() {
     void loadServerTimeline();
     return () => { cancelled = true; };
   }, [selectedMode, selectedDate, field?.id, venueConfig?.slotDurationMinutes, activeSport]);
+
+  // Disponibilidad por cancha (unidad) desde el servidor. Igual que el
+  // timeline, el RPC es la fuente de verdad porque RLS oculta al cliente las
+  // reservas de otros. Pádel usa un field virtual (agrega varias canchas
+  // físicas) que el RPC no entiende → fallback client-side.
+  useEffect(() => {
+    let cancelled = false;
+    const loadServerUnitOptions = async () => {
+      if (!selectedMode || !field || !startTime || !endTime || activeSport === 'padel' || field.id.startsWith('virtual-')) {
+        setServerUnitOptions(null);
+        return;
+      }
+      const { data, error } = await supabase.rpc('rpc_get_unit_options', {
+        p_field_id: field.id,
+        p_field_type: selectedMode,
+        p_date: selectedDate,
+        p_start_time: startTime,
+        p_end_time: endTime,
+      });
+      if (cancelled) return;
+      setServerUnitOptions(!error && Array.isArray(data) ? (data as UnitOption[]) : null);
+    };
+    void loadServerUnitOptions();
+    return () => { cancelled = true; };
+  }, [selectedMode, field?.id, selectedDate, startTime, endTime, activeSport]);
 
   useEffect(() => {
     let cancelled = false;

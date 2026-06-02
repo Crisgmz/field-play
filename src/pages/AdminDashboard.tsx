@@ -45,7 +45,7 @@ import AdminDailyCalendar from '@/components/AdminDailyCalendar';
 import ReportsSection from '@/components/ReportsSection';
 import AdminCreateBookingDialog, { type AdminCreateBookingInitialValues } from '@/components/AdminCreateBookingDialog';
 import EditBookingDialog from '@/components/EditBookingDialog';
-import { formatBlockType, formatBookingDate, formatBookingStatus, formatCurrency, formatPaymentMethod, formatTime12h, getBookingStatusLabel, getBookingStatusTone, getStatusTone } from '@/lib/bookingFormat';
+import { formatBlockType, formatBookingDate, formatBookingStatus, formatCurrency, formatPaymentMethod, formatSubmittedAt, formatTime12h, getBookingStatusLabel, getBookingStatusTone, getStatusTone } from '@/lib/bookingFormat';
 import { KpiRowSkeleton, TableRowSkeleton } from '@/components/skeletons';
 import { useDialogBackButton } from '@/hooks/useDialogBackButton';
 import { Settings } from 'lucide-react';
@@ -1321,6 +1321,10 @@ export default function AdminDashboard() {
                       </div>
                     </div>
 
+                    {booking.created_at && (
+                      <p className="mt-2 text-[11px] text-muted-foreground">Enviada: {formatSubmittedAt(booking.created_at)}</p>
+                    )}
+
                     <div className="mt-4 flex flex-col gap-2 sm:flex-row">
                       {!isConfirmed && booking.status !== 'cancelled' && (
                         <Button
@@ -1349,13 +1353,14 @@ export default function AdminDashboard() {
                       <th className="px-4 py-3 text-xs font-medium text-muted-foreground">Hora</th>
                       <th className="px-4 py-3 text-xs font-medium text-muted-foreground">Tipo</th>
                       <th className="px-4 py-3 text-xs font-medium text-muted-foreground">Estado</th>
+                      <th className="px-4 py-3 text-xs font-medium text-muted-foreground">Enviada</th>
                       <th className="px-4 py-3 text-xs font-medium text-muted-foreground">Acciones</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filteredBookings.length === 0 && (
                       <tr>
-                        <td colSpan={6} className="px-4 py-8 text-center text-sm text-muted-foreground">
+                        <td colSpan={7} className="px-4 py-8 text-center text-sm text-muted-foreground">
                           No hay reservas que coincidan con los filtros.
                         </td>
                       </tr>
@@ -1378,6 +1383,7 @@ export default function AdminDashboard() {
                               {getBookingStatusLabel(booking)}
                             </span>
                           </td>
+                          <td className="px-4 py-3 whitespace-nowrap text-xs text-muted-foreground">{formatSubmittedAt(booking.created_at)}</td>
                           <td className="px-4 py-3">
                             <div className="flex gap-2">
                               {!isConfirmed && booking.status !== 'cancelled' && (
@@ -2414,6 +2420,13 @@ export default function AdminDashboard() {
                 <div className="rounded-xl border border-border p-3"><p className="text-xs text-muted-foreground">Estado</p><p className="mt-1 font-semibold text-foreground">{getBookingStatusLabel(selectedBooking)}</p></div>
                 <div className="rounded-xl border border-border p-3"><p className="text-xs text-muted-foreground">Fecha</p><p className="mt-1 font-semibold text-foreground">{selectedBooking.date}</p></div>
                 <div className="rounded-xl border border-border p-3"><p className="text-xs text-muted-foreground">Hora</p><p className="mt-1 font-semibold text-foreground">{formatTime12h(selectedBooking.start_time)} – {formatTime12h(selectedBooking.end_time)}</p></div>
+                {selectedBooking.created_at && (
+                  <div className="col-span-2 rounded-xl border border-border p-3">
+                    <p className="text-xs text-muted-foreground">Enviada al sistema</p>
+                    <p className="mt-1 font-semibold text-foreground">{formatSubmittedAt(selectedBooking.created_at)}</p>
+                    <p className="mt-0.5 text-[11px] text-muted-foreground">Determina quién reservó primero ante un conflicto.</p>
+                  </div>
+                )}
               </div>
               <div className="rounded-xl bg-accent p-4 text-accent-foreground">
                 <p className="text-xs">Total</p>

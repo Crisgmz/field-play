@@ -865,8 +865,25 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     if (!rpcResult.error && rpcResult.data) {
       data = rpcResult.data as BookingRow;
+    } else if (
+      rpcResult.error &&
+      rpcResult.error.code !== 'PGRST202' &&
+      rpcResult.error.code !== '42883' &&
+      !/could not find the function|does not exist/i.test(rpcResult.error.message ?? '')
+    ) {
+      // La RPC transaccional EXISTE y rechazó la reserva (conflicto de horario
+      // / validación). No caemos al insert directo: ese camino no valida
+      // conflictos cruzados (F5/F7/F11 comparten zona física con distinto
+      // field_unit_id, así que el exclusion constraint de la tabla no los
+      // detecta) y permitiría un overlap. Propagamos el error.
+      throw new Error(
+        (rpcResult.error.message ?? '').includes('BOOKING_CONFLICT')
+          ? 'Esa cancha se acaba de ocupar para ese horario. Elige otra cancha u otro horario.'
+          : 'No se pudo crear la reserva. Intenta nuevamente.',
+      );
     } else {
-      // Fallback for local/dev environments where the migration hasn't been applied yet.
+      // Fallback solo para entornos local/dev donde la RPC todavía no está
+      // desplegada (función inexistente o con otra firma).
       const insertResult = await supabase
         .from('bookings')
         .insert({

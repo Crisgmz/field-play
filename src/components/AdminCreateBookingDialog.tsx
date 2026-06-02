@@ -329,30 +329,35 @@ export default function AdminCreateBookingDialog({ open, onOpenChange, initialVa
     }
 
     setSubmitting(true);
-    const created = await createBooking({
-      user_id: form.client_id,
-      club_id: form.club_id,
-      field_unit_id: unitId,
-      field_type: form.mode as FieldType,
-      date: form.date,
-      start_time: form.start_time,
-      end_time: form.end_time,
-      total_price: Number(form.total_price),
-      status: form.status,
-      payment_method: form.payment_method,
-      notes: form.notes || null,
-      created_by_admin: true,
-    });
-    setSubmitting(false);
+    try {
+      const created = await createBooking({
+        user_id: form.client_id,
+        club_id: form.club_id,
+        field_unit_id: unitId,
+        field_type: form.mode as FieldType,
+        date: form.date,
+        start_time: form.start_time,
+        end_time: form.end_time,
+        total_price: Number(form.total_price),
+        status: form.status,
+        payment_method: form.payment_method,
+        notes: form.notes || null,
+        created_by_admin: true,
+      });
 
-    if (!created) {
-      toast.error('No se pudo crear la reserva. Verifica que la migración 010 esté aplicada y que el horario no choque con otra reserva.');
-      return;
+      if (!created) {
+        toast.error('No se pudo crear la reserva. Verifica que la migración 010 esté aplicada y que el horario no choque con otra reserva.');
+        return;
+      }
+
+      toast.success(`Reserva creada para ${selectedClient?.first_name} ${selectedClient?.last_name}.`);
+      onOpenChange(false);
+      resetForm();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo crear la reserva.');
+    } finally {
+      setSubmitting(false);
     }
-
-    toast.success(`Reserva creada para ${selectedClient?.first_name} ${selectedClient?.last_name}.`);
-    onOpenChange(false);
-    resetForm();
   };
 
   return (

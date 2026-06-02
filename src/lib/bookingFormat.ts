@@ -126,3 +126,19 @@ export function formatBookingDate(dateString: string): string {
     year: 'numeric',
   }).format(date);
 }
+
+// Hora exacta en que la reserva entró al sistema (created_at). Sirve para
+// resolver "quién reservó primero" ante un conflicto: incluye día, hora,
+// minuto y segundo. Compacto para listas.
+export function formatSubmittedAt(createdAt: string | null | undefined): string {
+  if (!createdAt) return '—';
+  const date = new Date(createdAt);
+  if (Number.isNaN(date.getTime())) return '—';
+  return new Intl.DateTimeFormat('es-DO', {
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).format(date);
+}
