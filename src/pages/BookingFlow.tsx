@@ -8,6 +8,8 @@ import FieldModeSelector from '@/components/FieldModeSelector';
 import TimeSlotPicker from '@/components/TimeSlotPicker';
 import ClubGallery from '@/components/ClubGallery';
 import CourtLayoutPreview from '@/components/CourtLayoutPreview';
+import PaymentBrands from '@/components/PaymentBrands';
+import { REFUND_POLICY_PATH } from '@/lib/legal';
 import { enforceClientTimeRestriction, getAvailableTimeSlotsV2, getUnitOptions, getUnitsByType } from '@/lib/availability';
 import { formatTime12h } from '@/lib/bookingFormat';
 import { useAppData } from '@/contexts/AppDataContext';
@@ -916,8 +918,13 @@ export default function BookingFlow() {
 
                 <p className="mt-4 text-xs text-muted-foreground">
                   <strong>Política de cancelación:</strong> con más de {CANCELLATION_POLICY_HOURS}h de anticipación calificas para reembolso.
-                  Cancelaciones con menos de {CANCELLATION_POLICY_HOURS}h o no-shows no son reembolsables.
+                  Cancelaciones con menos de {CANCELLATION_POLICY_HOURS}h o no-shows no son reembolsables.{' '}
+                  <a href={REFUND_POLICY_PATH} target="_blank" rel="noreferrer" className="font-medium text-primary hover:underline">
+                    Ver política completa
+                  </a>
                 </p>
+
+                <PaymentBrands align="start" className="mt-5 border-t border-border pt-4" />
               </div>
             </section>
           )}

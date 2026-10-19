@@ -8,6 +8,8 @@ import { supabase } from '@/lib/supabase';
 import { Booking } from '@/types';
 import { BookingsListSkeleton } from '@/components/skeletons';
 import { formatTime12h } from '@/lib/bookingFormat';
+import PaymentBrands from '@/components/PaymentBrands';
+import { REFUND_POLICY_PATH } from '@/lib/legal';
 
 const ACCEPTED_PROOF_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
 const MAX_PROOF_SIZE_BYTES = 10 * 1024 * 1024;
@@ -104,7 +106,12 @@ export default function MyBookings() {
       <h1 className="mb-2 font-heading text-2xl font-bold text-foreground">Mis reservas</h1>
       <div className="mb-6 flex items-start gap-2 rounded-xl border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
         <Info className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
-        <p>Política de cancelación: con más de 24h de anticipación calificas para reembolso. Cancelaciones con menos de 24h o no-shows no son reembolsables.</p>
+        <p>
+          Política de cancelación: con más de 24h de anticipación calificas para reembolso. Cancelaciones con menos de 24h o no-shows no son reembolsables.{' '}
+          <a href={REFUND_POLICY_PATH} target="_blank" rel="noreferrer" className="font-medium text-primary hover:underline">
+            Ver política completa
+          </a>
+        </p>
       </div>
 
       {loading ? (
@@ -197,6 +204,8 @@ export default function MyBookings() {
           })}
         </div>
       )}
+
+      <PaymentBrands className="mt-10 border-t border-border pt-6" />
 
       {cancelDialog && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog">

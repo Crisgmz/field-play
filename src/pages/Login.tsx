@@ -8,6 +8,7 @@ import { Eye, EyeOff } from 'lucide-react';
 import { toast } from 'sonner';
 import logoUrl from '@/logos/logo.png';
 import VerifyEmailCode from '@/components/VerifyEmailCode';
+import PaymentBrands from '@/components/PaymentBrands';
 
 // Vite resuelve estos globs en build-time. Para agregar más fotos al
 // slideshow basta con dejarlas en src/images/ con extensión soportada.
@@ -224,6 +225,8 @@ export default function Login() {
               </p>
             </>
           )}
+
+          <PaymentBrands className="mt-10 border-t border-border pt-6" />
         </div>
       </div>
     </div>
