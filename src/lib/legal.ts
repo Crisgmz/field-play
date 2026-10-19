@@ -3,10 +3,11 @@
 // Si cambia la razón social o el contacto, se actualiza solo aquí.
 export const LEGAL_INFO = {
   tradeName: 'RealPlay',
-  companyName: 'Mango POS S.R.L.',
-  supportEmail: 'soporte@mangopos.do',
-  phone: '+1 849-267-8985',
-  address: 'Jardines Universitarios II, Villa Olímpica, Santiago, República Dominicana 51000',
+  companyName: 'Club Real Deportivo ADR Santiago, S.R.L.',
+  rnc: '132-77209-1',
+  supportEmail: 'cclubrealdeportivo@gmail.com',
+  phone: '+1 809-714-3567',
+  address: 'Calle Los Garcia No. 1, Reparto Imperial, Santiago de los Caballeros, República Dominicana 51000',
   country: 'República Dominicana',
   currency: 'Peso dominicano (DOP / RD$)',
   paymentProcessor: 'AZUL',

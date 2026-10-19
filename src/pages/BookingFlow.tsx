@@ -21,7 +21,7 @@ const BANK_ACCOUNT = {
   bank: 'Banco Popular',
   accountType: 'Cuenta corriente',
   accountNumber: '832296057',
-  accountName: 'Club Real Deportivo',
+  accountName: 'Club Real Deportivo ADR',
 };
 
 const ACCEPTED_PROOF_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];

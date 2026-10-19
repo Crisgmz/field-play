@@ -85,8 +85,8 @@ export default function PaymentPolicies() {
                 condiciones aquí descritas.
               </p>
               <p>
-                El comercio responsable de la operación es <strong>{LEGAL_INFO.companyName}</strong>, con dirección
-                permanente en <strong>{LEGAL_INFO.address}</strong>.
+                El comercio responsable de la operación es <strong>{LEGAL_INFO.companyName}</strong> (RNC{' '}
+                {LEGAL_INFO.rnc}), con dirección permanente en <strong>{LEGAL_INFO.address}</strong>.
               </p>
             </section>
 
@@ -241,6 +241,8 @@ export default function PaymentPolicies() {
                   <MapPin className="mt-1 h-4 w-4 shrink-0 text-primary" />
                   <span>
                     <strong>{LEGAL_INFO.companyName}</strong>
+                    <br />
+                    RNC {LEGAL_INFO.rnc}
                     <br />
                     {LEGAL_INFO.address}
                   </span>
