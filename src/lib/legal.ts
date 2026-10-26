@@ -13,9 +13,12 @@ export const LEGAL_INFO = {
   paymentProcessor: 'AZUL',
   paymentPolicyEffectiveDate: '19 de octubre de 2026',
   paymentPolicyUpdatedAt: '19 de octubre de 2026',
+  privacyPolicyEffectiveDate: '23 de octubre de 2026',
+  privacyPolicyUpdatedAt: '23 de octubre de 2026',
 };
 
 export const CANCELLATION_POLICY_HOURS = 24;
 
 export const PAYMENT_POLICY_PATH = '/politicas-de-pago';
 export const REFUND_POLICY_PATH = `${PAYMENT_POLICY_PATH}#devoluciones`;
+export const PRIVACY_POLICY_PATH = '/politica-de-privacidad';

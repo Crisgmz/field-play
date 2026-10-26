@@ -3,7 +3,7 @@ import visaLogo from '@/logos/payments/visa.png';
 import mastercardLogo from '@/logos/payments/mastercard.png';
 import popularLogo from '@/logos/payments/servicios-digitales-popular.png';
 import threeDSecureLogo from '@/logos/payments/verified-visa-mastercard.png';
-import { LEGAL_INFO, PAYMENT_POLICY_PATH, REFUND_POLICY_PATH } from '@/lib/legal';
+import { LEGAL_INFO, PAYMENT_POLICY_PATH, PRIVACY_POLICY_PATH, REFUND_POLICY_PATH } from '@/lib/legal';
 
 type PaymentBrandsProps = {
   align?: 'center' | 'start';
@@ -39,13 +39,15 @@ export default function PaymentBrands({ align = 'center', className = '' }: Paym
       </div>
 
       {/* Nueva pestaña: en el checkout no queremos perder la reserva en curso. */}
-      <p className={`flex flex-wrap items-center gap-x-3 gap-y-1 text-xs ${justify}`}>
+      <p className={`flex flex-wrap items-center gap-x-4 gap-y-1 text-xs ${justify}`}>
         <a href={PAYMENT_POLICY_PATH} target="_blank" rel="noreferrer" className="font-medium text-primary hover:underline">
           Políticas de pago
         </a>
-        <span className="text-muted-foreground/50" aria-hidden>·</span>
         <a href={REFUND_POLICY_PATH} target="_blank" rel="noreferrer" className="font-medium text-primary hover:underline">
           Devoluciones y reembolsos
+        </a>
+        <a href={PRIVACY_POLICY_PATH} target="_blank" rel="noreferrer" className="font-medium text-primary hover:underline">
+          Política de privacidad
         </a>
       </p>
     </div>

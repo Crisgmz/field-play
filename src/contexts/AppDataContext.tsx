@@ -1061,8 +1061,11 @@ export const AppDataProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (!ctx?.owner?.email) return;
     try {
       await sendBookingConfirmedEmail({
+        bookingId: ctx.booking.id,
         email: ctx.owner.email,
         firstName: ctx.owner.first_name,
+        lastName: ctx.owner.last_name,
+        paymentMethod: ctx.booking.payment_method,
         clubId: ctx.booking.club_id,
         clubName: ctx.club?.name,
         clubLocation: ctx.club?.location,

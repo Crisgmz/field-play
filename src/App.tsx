@@ -17,6 +17,7 @@ import MyBookings from "@/pages/MyBookings";
 import Profile from "@/pages/Profile";
 import AdminDashboard from "@/pages/AdminDashboard";
 import PaymentPolicies from "@/pages/PaymentPolicies";
+import PrivacyPolicy from "@/pages/PrivacyPolicy";
 import NotFound from "./pages/NotFound";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import ForceChangePassword from "@/components/ForceChangePassword";
@@ -141,9 +142,10 @@ function AppRoutes() {
             maneja su propia sesión vía el hash de la URL (Supabase recovery). */}
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
-        {/* Políticas de pago (requisito AZUL): pública para que se pueda
-            leer antes de iniciar sesión. */}
+        {/* Políticas (requisito AZUL): públicas para que se puedan leer
+            antes de iniciar sesión. */}
         <Route path="/politicas-de-pago" element={<PaymentPolicies />} />
+        <Route path="/politica-de-privacidad" element={<PrivacyPolicy />} />
         <Route path="/" element={<ProtectedRoute><Home /></ProtectedRoute>} />
         <Route path="/clubs/:clubId" element={<ProtectedRoute><BookingFlow /></ProtectedRoute>} />
         <Route path="/clubs/:clubId/book" element={<ProtectedRoute><BookingFlow /></ProtectedRoute>} />

@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { PaymentMethod } from '@/types';
 
 type RegistrationEmailPayload = {
   email: string;
@@ -45,8 +46,11 @@ interface AdminBookingAlertPayload {
 }
 
 interface BookingConfirmedEmailPayload {
+  bookingId: string;
   email: string;
   firstName: string;
+  lastName?: string;
+  paymentMethod?: PaymentMethod;
   clubId: string;
   clubName?: string;
   clubLocation?: string;
@@ -128,6 +132,8 @@ export async function sendBookingConfirmedEmail(payload: BookingConfirmedEmailPa
     body: {
       ...payload,
       formattedDate: formatDate(payload.date),
+      // El comprobante enlaza a las políticas públicas de la app.
+      appUrl: window.location.origin,
     },
   });
 
